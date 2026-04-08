@@ -22,138 +22,143 @@ impl Parser {
         self.tokens.get(self.pos).unwrap_or(&Token::Eof)
     }
 
-    fn advance(&mut self) -> &Token {
-        let t = &self.tokens[self.pos];
+    fn advance(&mut self) -> Result<Token, String> {
+        if self.pos >= self.tokens.len() {
+            return Err("unexpected end of input".into());
+        }
+        let t = self.tokens[self.pos].clone();
         self.pos += 1;
-        t
+        Ok(t)
     }
 
-    fn expect_ident(&mut self) -> String {
-        match self.advance().clone() {
-            Token::Ident(s) => s,
-            t => panic!("Expected Ident, got {:?}", t),
+    fn expect_ident(&mut self) -> Result<String, String> {
+        match self.advance()? {
+            Token::Ident(s) => Ok(s),
+            t => Err(format!("expected identifier, got {:?}", t)),
         }
     }
 
-    fn expect(&mut self, expected: &Token) {
-        let t = self.advance().clone();
+    fn expect(&mut self, expected: &Token) -> Result<(), String> {
+        let t = self.advance()?;
         if &t != expected {
-            panic!("Expected {:?}, got {:?}", expected, t);
+            Err(format!("expected {:?}, got {:?}", expected, t))
+        } else {
+            Ok(())
         }
     }
 
-    pub fn parse(&mut self) -> Document {
+    pub fn parse(&mut self) -> Result<Document, String> {
         let mut vars = HashMap::new();
         let mut blocks = Vec::new();
 
         while self.current() != &Token::Eof {
             match self.current().clone() {
                 Token::Ident(ref name) if name == "STYLES" => {
-                    let style_vars = self.parse_styles();
+                    let style_vars = self.parse_styles()?;
                     vars.extend(style_vars);
                 }
                 Token::Ident(_) => {
-                    blocks.push(self.parse_block());
+                    blocks.push(self.parse_block()?);
                 }
-                _ => { self.advance(); }
+                _ => { self.advance()?; }
             }
         }
 
-        Document { vars, blocks }
+        Ok(Document { vars, blocks })
     }
 
     // Parse STYLES({ #key: value, ... }) → HashMap
-    fn parse_styles(&mut self) -> HashMap<String, Value> {
-        self.expect_ident(); // consume "STYLES"
-        self.expect(&Token::LParen);
-        self.expect(&Token::LBrace);
+    fn parse_styles(&mut self) -> Result<HashMap<String, Value>, String> {
+        self.expect_ident()?; // consume "STYLES"
+        self.expect(&Token::LParen)?;
+        self.expect(&Token::LBrace)?;
 
         let mut vars = HashMap::new();
 
         while self.current() != &Token::RBrace && self.current() != &Token::Eof {
             if let Token::Hash(key) = self.current().clone() {
-                self.advance();
-                self.expect(&Token::Colon);
-                let value = self.parse_value();
+                self.advance()?;
+                self.expect(&Token::Colon)?;
+                let value = self.parse_value()?;
                 vars.insert(key, value);
             } else if self.current() == &Token::Comma {
-                self.advance();
+                self.advance()?;
             } else {
-                self.advance();
+                self.advance()?;
             }
         }
 
-        self.expect(&Token::RBrace);
-        self.expect(&Token::RParen);
+        self.expect(&Token::RBrace)?;
+        self.expect(&Token::RParen)?;
 
-        vars
+        Ok(vars)
     }
 
     // Parse a value token into a Value
-    fn parse_value(&mut self) -> Value {
-        match self.advance().clone() {
-            Token::String(s) => Value::Str(s),
-            Token::Number(n) => Value::Number(n),
-            Token::Unit(n, u) => Value::Unit(n, u),
+    fn parse_value(&mut self) -> Result<Value, String> {
+        match self.advance()? {
+            Token::String(s) => Ok(Value::Str(s)),
+            Token::Number(n) => Ok(Value::Number(n)),
+            Token::Unit(n, u) => Ok(Value::Unit(n, u)),
             Token::Hash(s) => {
                 // #FF0000 is a color, #name is a variable
                 if s.chars().all(|c| c.is_ascii_hexdigit()) && s.len() == 6 {
-                    Value::Color(s)
+                    Ok(Value::Color(s))
                 } else {
-                    Value::Var(s)
+                    Ok(Value::Var(s))
                 }
             }
-            t => panic!("Expected value, got {:?}", t),
+            t => Err(format!("expected value, got {:?}", t)),
         }
     }
 
     // Parse attrs: { key: value, key: value }
-    fn parse_attrs(&mut self) -> HashMap<String, Value> {
-        self.expect(&Token::LBrace);
+    fn parse_attrs(&mut self) -> Result<HashMap<String, Value>, String> {
+        self.expect(&Token::LBrace)?;
         let mut attrs = HashMap::new();
 
         while self.current() != &Token::RBrace && self.current() != &Token::Eof {
             match self.current().clone() {
                 Token::Ident(key) => {
-                    self.advance();
-                    self.expect(&Token::Colon);
-                    let value = self.parse_value();
+                    self.advance()?;
+                    self.expect(&Token::Colon)?;
+                    let value = self.parse_value()?;
                     attrs.insert(key, value);
                 }
-                Token::Comma => { self.advance(); }
-                _ => { self.advance(); }
+                Token::Comma => { self.advance()?; }
+                _ => { self.advance()?; }
             }
         }
 
-        self.expect(&Token::RBrace);
-        attrs
+        self.expect(&Token::RBrace)?;
+        Ok(attrs)
     }
 
     // Parse a block: IDENT({attrs} content) or IDENT(content)
-    fn parse_block(&mut self) -> Block {
-        let kind = self.expect_ident();
-        self.expect(&Token::LParen);
+    fn parse_block(&mut self) -> Result<Block, String> {
+        let kind = self.expect_ident()?;
+        self.expect(&Token::LParen)?;
 
         let attrs = if self.current() == &Token::LBrace {
-            self.parse_attrs()
+            self.parse_attrs()?
         } else {
             HashMap::new()
         };
 
-        let content = self.parse_content();
+        let content = self.parse_content()?;
 
-        self.expect(&Token::RParen);
+        self.expect(&Token::RParen)?;
 
-        Block { kind, attrs, content }
+        Ok(Block { kind, attrs, content })
     }
 
     // Parse content: text or nested blocks until RParen
-    fn parse_content(&mut self) -> Content {
+    fn parse_content(&mut self) -> Result<Content, String> {
         match self.current().clone() {
-            Token::RParen => Content::Empty,
+            Token::RParen => Ok(Content::Empty),
             Token::Text(s) => {
-                self.advance();
-                Content::Text(s)
+                self.advance()?;
+                Ok(Content::Text(s))
             }
             Token::Ident(_) => {
                 // nested blocks
@@ -162,19 +167,19 @@ impl Parser {
                     match self.current().clone() {
                         Token::Ident(ref name) if name == "STYLES" => {
                             // page-level STYLES — skip for now
-                            self.parse_styles();
+                            self.parse_styles()?;
                         }
                         Token::Ident(_) => {
-                            blocks.push(self.parse_block());
+                            blocks.push(self.parse_block()?);
                         }
-                        _ => { self.advance(); }
+                        _ => { self.advance()?; }
                     }
                 }
-                Content::Blocks(blocks)
+                Ok(Content::Blocks(blocks))
             }
             _ => {
-                self.advance();
-                Content::Empty
+                self.advance()?;
+                Ok(Content::Empty)
             }
         }
     }
