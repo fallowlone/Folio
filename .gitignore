@@ -1,0 +1,4 @@
+/target
+*.folio.bak
+.env
+.DS_Store
