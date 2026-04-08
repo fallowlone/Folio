@@ -28,8 +28,13 @@ fn main() {
             let mut lexer = Lexer::new(&input);
             let tokens = lexer.tokenize();
             let mut parser = Parser::new(tokens);
-            let _doc = parser.parse();
-            println!("✓ valid");
+            match parser.parse() {
+                Ok(_) => println!("✓ valid"),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    process::exit(1);
+                }
+            }
         }
 
         Commands::Convert { file, format, output } => {
@@ -37,7 +42,10 @@ fn main() {
             let mut lexer = Lexer::new(&input);
             let tokens = lexer.tokenize();
             let mut parser = Parser::new(tokens);
-            let doc = parser.parse();
+            let doc = parser.parse().unwrap_or_else(|e| {
+                eprintln!("error: {e}");
+                process::exit(1);
+            });
             let doc = parser::resolver::resolve(doc);
 
             let result = match format.as_str() {

@@ -5,7 +5,7 @@ fn parse(input: &str) -> Document {
     let mut lexer = Lexer::new(input);
     let tokens = lexer.tokenize();
     let mut parser = Parser::new(tokens);
-    let doc = parser.parse();
+    let doc = parser.parse().expect("parse failed");
     resolver::resolve(doc)
 }
 
