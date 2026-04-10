@@ -18,10 +18,10 @@ pub enum Commands {
     Validate {
         file: PathBuf,
     },
-    /// Convert a .fol file to JSON or plain text
+    /// Convert a .fol file to JSON, text, HTML, PDF, or SVG
     Convert {
         file: PathBuf,
-        /// Output format: json, text, html, pdf (default: json)
+        /// Output format: json, text, html, pdf, svg (default: json)
         #[arg(long, default_value = "json")]
         format: String,
         /// Write output to file instead of stdout

@@ -66,7 +66,10 @@ fn main() {
             let doc = parser::id::assign_ids(doc);
 
             if format == "pdf" {
-                let pdf_data = engine::render_pdf(&doc);
+                let pdf_data = engine::render(
+                    &doc,
+                    engine::ExportOptions { format: engine::ExportFormat::Pdf },
+                );
                 match output {
                     Some(path) => {
                         fs::write(&path, &pdf_data).unwrap_or_else(|e| {
@@ -87,12 +90,32 @@ fn main() {
                 return;
             }
 
+            if format == "svg" {
+                let svg_data = String::from_utf8(
+                    engine::render(
+                        &doc,
+                        engine::ExportOptions { format: engine::ExportFormat::Svg },
+                    ),
+                )
+                .unwrap_or_else(|_| String::new());
+                match output {
+                    Some(path) => {
+                        fs::write(&path, svg_data).unwrap_or_else(|e| {
+                            eprintln!("error: could not write to {}: {e}", path.display());
+                            process::exit(1);
+                        });
+                    }
+                    None => print!("{}", svg_data),
+                }
+                return;
+            }
+
             let result = match format.as_str() {
                 "json" => renderer::json::render(&doc),
                 "text" => renderer::text::render(&doc),
                 "html" => renderer::html::render(&doc),
                 other => {
-                    eprintln!("error: unknown format '{other}'. Use json, text, html, or pdf.");
+                    eprintln!("error: unknown format '{other}'. Use json, text, html, pdf, or svg.");
                     process::exit(1);
                 }
             };

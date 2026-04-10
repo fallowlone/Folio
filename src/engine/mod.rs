@@ -15,14 +15,31 @@ use crate::parser::ast::{Content, Document, NodeId, Value};
 static RENDER_CACHE: OnceLock<Mutex<HashMap<u64, Vec<u8>>>> = OnceLock::new();
 const RENDER_CACHE_LIMIT: usize = 32;
 
-/// Полный pipeline: Document → PDF bytes
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExportFormat {
+    Pdf,
+    Svg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExportOptions {
+    pub format: ExportFormat,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self { format: ExportFormat::Pdf }
+    }
+}
+
+/// Полный pipeline: Document → bytes выбранного формата.
 ///
 /// 1. Resolver:  AST → StyledTree (Arena)
 /// 2. Layout:    StyledTree → LayoutTree (taffy)
 /// 3. Paginate:  LayoutTree → PageTree (A4 pages)
-/// 4. Backend:   PageTree → PDF bytes (pdf-writer)
-pub fn render_pdf(doc: &Document) -> Vec<u8> {
-    let key = document_fingerprint(doc);
+/// 4. Backend:   PageTree → export bytes (PDF/SVG)
+pub fn render(doc: &Document, options: ExportOptions) -> Vec<u8> {
+    let key = render_cache_key(doc, options);
     if let Some(cached) = render_cache().lock().ok().and_then(|m| m.get(&key).cloned()) {
         return cached;
     }
@@ -30,9 +47,25 @@ pub fn render_pdf(doc: &Document) -> Vec<u8> {
     let styled = resolver::build_styled_tree(doc);
     let layout = layout::compute_layout(&styled);
     let pages  = paginate::paginate(&layout, &styled);
-    let pdf = backend::pdf::render(&pages);
-    cache_render(key, &pdf);
-    pdf
+
+    let bytes = match options.format {
+        ExportFormat::Pdf => backend::pdf::render(&pages),
+        ExportFormat::Svg => backend::svg::render(&pages).into_bytes(),
+    };
+
+    cache_render(key, &bytes);
+    bytes
+}
+
+/// Полный pipeline: Document → PDF bytes
+pub fn render_pdf(doc: &Document) -> Vec<u8> {
+    render(doc, ExportOptions { format: ExportFormat::Pdf })
+}
+
+/// Полный pipeline: Document → SVG string
+pub fn render_svg(doc: &Document) -> String {
+    String::from_utf8(render(doc, ExportOptions { format: ExportFormat::Svg }))
+        .unwrap_or_else(|_| String::new())
 }
 
 fn render_cache() -> &'static Mutex<HashMap<u64, Vec<u8>>> {
@@ -46,6 +79,13 @@ fn cache_render(key: u64, value: &[u8]) {
         }
         map.insert(key, value.to_vec());
     }
+}
+
+fn render_cache_key(doc: &Document, options: ExportOptions) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    document_fingerprint(doc).hash(&mut hasher);
+    options.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn document_fingerprint(doc: &Document) -> u64 {

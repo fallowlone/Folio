@@ -7,8 +7,9 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
+use std::sync::Arc;
 use std::collections::hash_map::DefaultHasher;
-use fontdb::{Database, Family, Query, Weight, Style as FontdbStyle, Stretch};
+use fontdb::{Database, Family, ID, Query, Weight, Style as FontdbStyle, Stretch};
 use rustybuzz::UnicodeBuffer;
 use super::layout::MM_TO_PT;
 
@@ -20,14 +21,18 @@ struct GlyphMetrics {
 }
 
 struct FontSource {
-    data: Vec<u8>,
+    data: Arc<[u8]>,
     face_index: u32,
+}
+
+struct FontSources {
+    regular: Option<FontSource>,
+    bold: Option<FontSource>,
 }
 
 static METRICS_REGULAR: OnceLock<Option<GlyphMetrics>> = OnceLock::new();
 static METRICS_BOLD:    OnceLock<Option<GlyphMetrics>> = OnceLock::new();
-static FONT_REGULAR:    OnceLock<Option<FontSource>> = OnceLock::new();
-static FONT_BOLD:       OnceLock<Option<FontSource>> = OnceLock::new();
+static FONT_SOURCES:    OnceLock<FontSources> = OnceLock::new();
 static TEXT_WIDTH_CACHE: OnceLock<Mutex<HashMap<TextWidthKey, f32>>> = OnceLock::new();
 static BREAK_TEXT_CACHE: OnceLock<Mutex<HashMap<BreakTextKey, Vec<TextLine>>>> = OnceLock::new();
 
@@ -53,8 +58,8 @@ struct BreakTextKey {
 }
 
 fn load_metrics(bold: bool) -> Option<GlyphMetrics> {
-    let source = load_font_source(bold)?;
-    let face = ttf_parser::Face::parse(&source.data, source.face_index).ok()?;
+    let source = get_font_source(bold)?;
+    let face = ttf_parser::Face::parse(source.data.as_ref(), source.face_index).ok()?;
     let units_per_em = face.units_per_em();
     let mut advances = HashMap::with_capacity(512);
     // Кешируем ASCII + Latin Extended (покрывает немецкие умлауты и типографику)
@@ -79,12 +84,28 @@ fn load_metrics(bold: bool) -> Option<GlyphMetrics> {
     Some(GlyphMetrics { advances, units_per_em })
 }
 
-fn load_font_source(bold: bool) -> Option<FontSource> {
+fn load_font_sources() -> FontSources {
     let mut db = Database::new();
     db.load_system_fonts();
 
-    let weight = if bold { Weight::BOLD } else { Weight::NORMAL };
-    let id = db.query(&Query {
+    let regular_id = query_font_id(&db, Weight::NORMAL);
+    let bold_id = query_font_id(&db, Weight::BOLD);
+
+    let regular = regular_id.and_then(|id| extract_font_source(&db, id));
+    let bold = match (bold_id, regular_id, regular.as_ref()) {
+        (Some(bold), Some(reg), Some(regular_source)) if bold == reg => Some(FontSource {
+            data: Arc::clone(&regular_source.data),
+            face_index: regular_source.face_index,
+        }),
+        (Some(id), _, _) => extract_font_source(&db, id),
+        _ => None,
+    };
+
+    FontSources { regular, bold }
+}
+
+fn query_font_id(db: &Database, weight: Weight) -> Option<ID> {
+    db.query(&Query {
         families: &[
             Family::Name("Helvetica Neue"),
             Family::Name("Helvetica"),
@@ -94,12 +115,14 @@ fn load_font_source(bold: bool) -> Option<FontSource> {
         weight,
         style: FontdbStyle::Normal,
         stretch: Stretch::Normal,
-    })?;
+    })
+}
 
+fn extract_font_source(db: &Database, id: ID) -> Option<FontSource> {
     let mut result: Option<FontSource> = None;
     db.with_face_data(id, |data, face_idx| {
         result = Some(FontSource {
-            data: data.to_vec(),
+            data: Arc::from(data.to_vec()),
             face_index: face_idx,
         });
     });
@@ -112,8 +135,12 @@ fn get_metrics(bold: bool) -> Option<&'static GlyphMetrics> {
 }
 
 fn get_font_source(bold: bool) -> Option<&'static FontSource> {
-    let lock: &OnceLock<Option<FontSource>> = if bold { &FONT_BOLD } else { &FONT_REGULAR };
-    lock.get_or_init(|| load_font_source(bold)).as_ref()
+    let sources = FONT_SOURCES.get_or_init(load_font_sources);
+    if bold {
+        sources.bold.as_ref()
+    } else {
+        sources.regular.as_ref()
+    }
 }
 
 /// Возвращает горизонтальное смещение символа в pt при заданном размере шрифта.
@@ -154,8 +181,8 @@ fn shape_text_width_pt(text: &str, font_size_pt: f32, bold: bool) -> Option<f32>
         return Some(0.0);
     }
     let source = get_font_source(bold)?;
-    let rb_face = rustybuzz::Face::from_slice(&source.data, source.face_index)?;
-    let ttf_face = ttf_parser::Face::parse(&source.data, source.face_index).ok()?;
+    let rb_face = rustybuzz::Face::from_slice(source.data.as_ref(), source.face_index)?;
+    let ttf_face = ttf_parser::Face::parse(source.data.as_ref(), source.face_index).ok()?;
     let mut buffer = UnicodeBuffer::new();
     buffer.push_str(text);
     let glyph_buffer = rustybuzz::shape(&rb_face, &[], buffer);
