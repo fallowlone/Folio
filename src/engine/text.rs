@@ -5,7 +5,9 @@
 /// Если системный шрифт не найден — fallback на коэффициент 0.55.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, OnceLock};
+use std::collections::hash_map::DefaultHasher;
 use fontdb::{Database, Family, Query, Weight, Style as FontdbStyle, Stretch};
 use rustybuzz::UnicodeBuffer;
 use super::layout::MM_TO_PT;
@@ -26,6 +28,29 @@ static METRICS_REGULAR: OnceLock<Option<GlyphMetrics>> = OnceLock::new();
 static METRICS_BOLD:    OnceLock<Option<GlyphMetrics>> = OnceLock::new();
 static FONT_REGULAR:    OnceLock<Option<FontSource>> = OnceLock::new();
 static FONT_BOLD:       OnceLock<Option<FontSource>> = OnceLock::new();
+static TEXT_WIDTH_CACHE: OnceLock<Mutex<HashMap<TextWidthKey, f32>>> = OnceLock::new();
+static BREAK_TEXT_CACHE: OnceLock<Mutex<HashMap<BreakTextKey, Vec<TextLine>>>> = OnceLock::new();
+
+const TEXT_WIDTH_CACHE_LIMIT: usize = 8192;
+const BREAK_TEXT_CACHE_LIMIT: usize = 4096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TextWidthKey {
+    text_hash: u64,
+    text_len: usize,
+    font_size_bits: u32,
+    bold: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct BreakTextKey {
+    text_hash: u64,
+    text_len: usize,
+    max_width_bits: u32,
+    font_size_bits: u32,
+    line_height_bits: u32,
+    bold: bool,
+}
 
 fn load_metrics(bold: bool) -> Option<GlyphMetrics> {
     let source = load_font_source(bold)?;
@@ -104,10 +129,24 @@ pub fn char_advance_pt(ch: char, font_size_pt: f32, bold: bool) -> f32 {
 
 /// Возвращает ширину строки в pt.
 pub fn text_width_pt(text: &str, font_size_pt: f32, bold: bool) -> f32 {
+    let key = TextWidthKey {
+        text_hash: stable_hash(text),
+        text_len: text.len(),
+        font_size_bits: font_size_pt.to_bits(),
+        bold,
+    };
+
+    if let Some(cached) = text_width_cache().lock().ok().and_then(|m| m.get(&key).copied()) {
+        return cached;
+    }
+
     if let Some(width) = shape_text_width_pt(text, font_size_pt, bold) {
+        cache_text_width(key, width);
         return width;
     }
-    text.chars().map(|c| char_advance_pt(c, font_size_pt, bold)).sum()
+    let width = text.chars().map(|c| char_advance_pt(c, font_size_pt, bold)).sum();
+    cache_text_width(key, width);
+    width
 }
 
 fn shape_text_width_pt(text: &str, font_size_pt: f32, bold: bool) -> Option<f32> {
@@ -157,6 +196,18 @@ pub fn break_text(
 ) -> Vec<TextLine> {
     if text.is_empty() {
         return vec![];
+    }
+
+    let key = BreakTextKey {
+        text_hash: stable_hash(text),
+        text_len: text.len(),
+        max_width_bits: max_width_pt.to_bits(),
+        font_size_bits: font_size_pt.to_bits(),
+        line_height_bits: line_height.to_bits(),
+        bold,
+    };
+    if let Some(cached) = break_text_cache().lock().ok().and_then(|m| m.get(&key).cloned()) {
+        return cached;
     }
 
     let line_h = font_size_pt * line_height;
@@ -212,6 +263,7 @@ pub fn break_text(
         });
     }
 
+    cache_break_text(key, &lines);
     lines
 }
 
@@ -227,4 +279,36 @@ pub fn text_block_height(lines: &[TextLine]) -> f32 {
 #[allow(dead_code)]
 pub fn mm_to_pt(mm: f32) -> f32 {
     mm * MM_TO_PT
+}
+
+fn text_width_cache() -> &'static Mutex<HashMap<TextWidthKey, f32>> {
+    TEXT_WIDTH_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn break_text_cache() -> &'static Mutex<HashMap<BreakTextKey, Vec<TextLine>>> {
+    BREAK_TEXT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cache_text_width(key: TextWidthKey, width: f32) {
+    if let Ok(mut map) = text_width_cache().lock() {
+        if map.len() >= TEXT_WIDTH_CACHE_LIMIT {
+            map.clear();
+        }
+        map.insert(key, width);
+    }
+}
+
+fn cache_break_text(key: BreakTextKey, lines: &[TextLine]) {
+    if let Ok(mut map) = break_text_cache().lock() {
+        if map.len() >= BREAK_TEXT_CACHE_LIMIT {
+            map.clear();
+        }
+        map.insert(key, lines.to_vec());
+    }
+}
+
+fn stable_hash(s: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
 }
