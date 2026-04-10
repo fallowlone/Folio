@@ -2,64 +2,75 @@ STYLES({
   #brand:   #1a1a2e
   #accent:  #0070c0
   #muted:   #555555
-  #light:   #f5f5f5
-  #border:  #cccccc
 })
 
 PAGE(
-  H2({color: #accent} Telefonica Germany GmbH und Co. OHG)
-  P({color: #muted, font-size: 9} Georg-Brauchle-Ring 50  80992 München  |  o2online.de/service/  |  089 78 79 79 40 0)
+  GRID({columns: 2}
+    H2({color: #accent, font-size: 20} o2)
+    P({color: #muted, font-size: 8} Telefonica Germany GmbH und Co. OHG
+Georg-Brauchle-Ring 50  80992 München
+Web: o2online.de/service/
+Telefon: 089 – 78 79 79 40 0)
+  )
 
   H1({color: #brand} Vertragszusammenfassung)
-  P({color: #muted, font-size: 9} o2 Home L 250  -  12.03.2026)
+  P({color: #muted, font-size: 9} o2 Home L 250  –  12.03.2026)
 
   P({font-size: 9} Diese Vertragszusammenfassung enthält die Hauptbestandteile dieses Dienstleistungsangebots, wie es das EU-Recht vorschreibt.)
-  P({font-size: 9} Sie erleichtert den Vergleich verschiedener Angebote.)
-  P({font-size: 9} Vollständige Information über die Dienstleistung sind in anderen Dokumenten enthalten.)
 
-  H2({color: #accent} Dienste und Geräte)
-  P({font-size: 9} Sprachtelefonanschluss mit Flatrate für Gespräche ins deutsche Fest- und Mobilfunknetz, Internetzugang mit unbegrenztem Datenvolumen. Die Dienste sind nur an der vereinbarten festen Anschlussadresse nutzbar.)
+  LIST(
+    ITEM({font-size: 9} Diese Zusammenfassung erleichtert den Vergleich verschiedener Angebote.)
+    ITEM({font-size: 9} Sie erhalten vollständige Informationen (z. B. zur Wohnadresse) in anderen Dokumenten.)
+    ITEM({font-size: 9} Vollständige Information über die Dienstleistung sind in anderen Dokumenten enthalten.)
+  )
+
+  HR()
+
+  H2({color: #accent} Dienst(e) und Gerät(e))
+  P({font-size: 9} Sprachtelefonanschluss mit Flatrate für Gespräche ins deutsche Fest- und Mobilfunknetz, Internetzugang mit unbegrenztem Datenvolumen. Die Dienste sind nur an der vereinbarten festen Anschlussadresse (z. B. der Wohnadresse) nutzbar.)
 
   H2({color: #accent} Geschwindigkeiten des Internetdienstes)
-  P({font-size: 9} Bei Bereitstellung über DSL und Glasfaser: Maximale und beworbene Datengeschwindigkeit 250 MBit/s im Download und 40 MBit/s im Upload, minimale 175 MBit/s im Download und 20 MBit/s im Upload, normalerweise 200 MBit/s im Download und 35 MBit/s im Upload.)
-  P({font-size: 9} Bei Bereitstellung über Kabel: Maximale 250 MBit/s im Download und 10 MBit/s im Upload, minimale 105 MBit/s im Download und 3 MBit/s im Upload, normalerweise 200 MBit/s im Download und 7 MBit/s im Upload.)
-  P({font-size: 9} Im Falle einer Abweichung der Geschwindigkeit können Sie unter den Voraussetzungen des TKG das Recht auf Minderung und Kündigung geltend machen.)
+  LIST({type: ordered}
+    ITEM({font-size: 9} Bei DSL und Glasfaser: maximal 250 MBit/s Down / 40 MBit/s Up, normalerweise 200 / 35 MBit/s.)
+    ITEM({font-size: 9} Bei Kabel: maximal 250 MBit/s Down / 10 MBit/s Up, normalerweise 200 / 7 MBit/s.)
+    ITEM({font-size: 9} Im Falle einer Abweichung können Sie das Recht auf Minderung und Kündigung geltend machen.)
+  )
 
   H2({color: #accent} Entgelte)
   TABLE(
-    ROW(
-      CELL({font-weight: "bold", flex-grow: 3} Leistung)
-      CELL({font-weight: "bold"} Monatlich)
-      CELL({font-weight: "bold"} Einmalig)
+    ROW({background-color: #0070c0}
+      CELL({font-weight: "bold", flex-grow: 3, color: white} Leistung)
+      CELL({font-weight: "bold", color: white} Monatliche Entgelte)
+      CELL({font-weight: "bold", color: white} Einmalige Entgelte)
     )
     ROW(
       CELL({flex-grow: 3} o2 Home L 250)
-      CELL(44,99 EUR)
-      CELL(0,00 EUR)
+      CELL(44,99 €)
+      CELL(0,00 €)
     )
     ROW(
-      CELL({flex-grow: 3} 40 EUR Rabatt auf den Anschlusspreis bis 11.04.2026)
-      CELL(-40,00 EUR)
+      CELL({flex-grow: 3} 40 EUR Rabatt auf den Anschlusspreis (bis zum 11.04.2026))
+      CELL({color: #008000} -40,00 €)
       CELL()
     )
     ROW(
       CELL({flex-grow: 3} Einmaliger Anschlusspreis)
-      CELL(0,00 EUR)
-      CELL(49,99 EUR)
+      CELL(0,00 €)
+      CELL(49,99 €)
     )
     ROW(
-      CELL({flex-grow: 3} 12 Monate 10 EUR Rabatt auf die Grundgebühr bis 11.03.2027)
-      CELL(-10,00 EUR)
+      CELL({flex-grow: 3} 12 Monate 10 EUR Rabatt auf die Grundgebühr (bis 11.03.2027))
+      CELL({color: #008000} -10,00 €)
       CELL()
     )
-    ROW(
+    ROW({background-color: #f0f4f8}
       CELL({font-weight: "bold", flex-grow: 3} Gesamtpreis)
-      CELL({font-weight: "bold"} 34,99 EUR)
-      CELL({font-weight: "bold"} 9,99 EUR)
+      CELL({font-weight: "bold"} 34,99 €)
+      CELL({font-weight: "bold"} 9,99 €)
     )
     ROW(
       CELL({flex-grow: 3} Nach 12 Monaten)
-      CELL(44,99 EUR)
+      CELL(44,99 €)
       CELL(Preise inkl. MwSt.)
     )
   )
@@ -70,10 +81,12 @@ PAGE(
 
   H2({color: #accent} Sonstige Angaben)
   P({font-size: 9} Diese Vertragszusammenfassung bezieht sich auf einen Abschluss eines neuen Vertrages mit den genannten Tarifkonditionen.)
-  P({font-size: 9} Die Energieeffizienzklasse des Geräts sowie Hersteller- und Sicherheitsinformationen finden Sie auf unserer Webseite im Bereich Geräte.)
+  P({font-size: 9} Die Energieeffizienzklasse des Geräts sowie Hersteller- und Sicherheitsinformationen finden Sie auf unserer Webseite im Bereich Geraete.)
+
+  HR()
 
   H2({color: #accent} Funktionsmerkmale für Endnutzer mit Behinderungen)
-  P({font-size: 9} Wenn der Tarif Gespräche beinhaltet, steht die Funktion Echtzeittext zur Verfügung, sofern das genutzte Endgerät diese unterstützt. Nähere Infos finden sich unter o2online.de/recht/barrierefreiheit/.)
+  P({font-size: 9} Wenn der Tarif Gespräche beinhaltet (was hier der Fall ist), steht die Funktion Echtzeittext zur Verfügung, sofern das genutzte Endgerät diese unterstützt. Nähere Infos dazu und weitere Informationen zur Barrierefreiheit finden sich unter https://www.o2online.de/recht/barrierefreiheit/.)
 
-  P({font-size: 8, color: #muted} Artikel 102 Absatz 3 der Richtlinie EU 2018/1972 des Europäischen Parlaments und Rates vom 11. Dezember 2018 über den europäischen Kodex für die elektronische Kommunikation.)
+  P({font-size: 8, color: #muted} Artikel 102 Absatz 3 der Richtlinie EU 2018/1972 des Europäischen Parlaments und Rates vom 11. Dezember 2018 über den europäischen Kodex für die elektronische Kommunikation. ABl. L 321 vom 17.12.2018, S. 36.)
 )

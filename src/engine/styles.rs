@@ -15,7 +15,15 @@ pub enum BoxKind {
     Quote,
     List,
     ListItem,
+    Hr,
     Unknown(String),
+}
+
+/// Стиль нумерации списка.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ListStyle {
+    Bullet,
+    Ordered,
 }
 
 impl BoxKind {
@@ -38,6 +46,7 @@ impl BoxKind {
             "QUOTE" => BoxKind::Quote,
             "LIST"  => BoxKind::List,
             "ITEM"  => BoxKind::ListItem,
+            "HR"    => BoxKind::Hr,
             other   => BoxKind::Unknown(other.to_string()),
         }
     }
@@ -96,6 +105,9 @@ pub struct ResolvedStyles {
 
     /// flex-grow для ячеек таблицы (управляет пропорциями колонок)
     pub flex_grow: f32,
+
+    /// Стиль нумерации списка
+    pub list_style: ListStyle,
 }
 
 impl Default for ResolvedStyles {
@@ -118,6 +130,7 @@ impl Default for ResolvedStyles {
             column_gap: 4.0,
             row_gap: 2.0,
             flex_grow: 0.0,
+            list_style: ListStyle::Bullet,
         }
     }
 }
@@ -151,6 +164,13 @@ impl ResolvedStyles {
                 s.padding = EdgeInsets::new(1.5, 2.0, 1.5, 2.0);
                 s.flex_grow = 1.0;
             }
+            BoxKind::List => {
+                s.padding = EdgeInsets::new(0.0, 0.0, 0.0, 6.0); // 6mm left indent for items
+                s.margin = EdgeInsets::new(0.0, 0.0, 2.0, 0.0);
+            }
+            BoxKind::ListItem => {
+                s.margin = EdgeInsets::new(0.0, 0.0, 1.5, 0.0);
+            }
             BoxKind::Code => {
                 s.font_family = "Courier".to_string();
                 s.font_size = 10.0;
@@ -160,6 +180,9 @@ impl ResolvedStyles {
             BoxKind::Quote => {
                 s.margin = EdgeInsets::new(0.0, 8.0, 4.0, 8.0);
                 s.color = Color::from_hex(0x666666);
+            }
+            BoxKind::Hr => {
+                s.margin = EdgeInsets::new(3.0, 0.0, 3.0, 0.0);
             }
             _ => {}
         }
