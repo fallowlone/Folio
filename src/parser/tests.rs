@@ -44,8 +44,24 @@ fn test_block_text_content() {
     let p = doc.block(doc.root_ids()[0]);
     assert_eq!(p.kind, "P");
     match &p.content {
-        Content::Text(s) => assert_eq!(s, "Hello World"),
-        _ => panic!("Expected Text content"),
+        Content::Inline(nodes) => assert_eq!(Document::inline_text(nodes), "Hello World"),
+        _ => panic!("Expected Inline content"),
+    }
+}
+
+#[test]
+fn test_inline_markup_nodes() {
+    let doc = parse("P(Hello *world* and **bold** with `code` and [link](https://example.com))");
+    let p = doc.block(doc.root_ids()[0]);
+    match &p.content {
+        Content::Inline(nodes) => {
+            let plain = Document::inline_text(nodes);
+            assert!(plain.contains("Hello world"));
+            assert!(plain.contains("bold"));
+            assert!(plain.contains("code"));
+            assert!(plain.contains("link"));
+        }
+        _ => panic!("Expected Inline content"),
     }
 }
 

@@ -4,10 +4,10 @@
 /// 1. Конвертация узлов в StyledBox с дефолтными стилями + явными attrs
 /// 2. Наследование стилей от родителя к ребёнку (font-size, color, etc.)
 
-use crate::parser::ast::{Block, Content, Document, NodeId as AstNodeId, Value};
+use crate::parser::ast::{Block, Content, Document, InlineNode, NodeId as AstNodeId, Value};
 use super::arena::DocumentArena;
 use super::styles::{
-    BoxContent, BoxKind, Color, Display, EdgeInsets, FontStyle, FontWeight,
+    BoxContent, BoxKind, Color, Display, EdgeInsets, FloatMode, FontStyle, FontWeight, InlineRun,
     ListStyle, ResolvedStyles, StyledBox, TextAlign,
 };
 
@@ -52,6 +52,7 @@ fn convert_block(
     // Конвертируем контент
     let content = match &block.content {
         Content::Text(s) => BoxContent::Text(s.clone()),
+        Content::Inline(nodes) => BoxContent::Inline(flatten_inline(nodes, false, false, None)),
         Content::Empty => BoxContent::Empty,
         Content::Children(children) => {
             // Сначала аллоцируем узел без детей
@@ -145,6 +146,10 @@ fn apply_attrs(styles: &mut ResolvedStyles, block: &Block) {
             "padding-left"   => { if let Some(v) = value_to_f32(value) { styles.padding.left = v; } }
             "width"  => { styles.width  = value_to_f32(value); }
             "height" => { styles.height = value_to_f32(value); }
+            "min-width" => { styles.min_width = value_to_f32(value); }
+            "max-width" => { styles.max_width = value_to_f32(value); }
+            "min-height" => { styles.min_height = value_to_f32(value); }
+            "max-height" => { styles.max_height = value_to_f32(value); }
             "line-height" => {
                 if let Some(v) = value_to_f32(value) {
                     styles.line_height = v;
@@ -158,6 +163,48 @@ fn apply_attrs(styles: &mut ResolvedStyles, block: &Block) {
                         "justify" => TextAlign::Justify,
                         _         => TextAlign::Left,
                     };
+                }
+            }
+            "letter-spacing" => {
+                if let Some(v) = value_to_f32(value) {
+                    styles.letter_spacing = v;
+                }
+            }
+            "word-spacing" => {
+                if let Some(v) = value_to_f32(value) {
+                    styles.word_spacing = v;
+                }
+            }
+            "justify" => {
+                match value {
+                    Value::Str(s) => styles.justify = matches!(s.as_str(), "true" | "yes" | "1"),
+                    Value::Number(n) => styles.justify = *n > 0.0,
+                    _ => {}
+                }
+            }
+            "keep-together" => {
+                if let Value::Str(s) = value {
+                    styles.keep_together = matches!(s.as_str(), "true" | "yes" | "1");
+                }
+            }
+            "keep-with-next" => {
+                if let Value::Str(s) = value {
+                    styles.keep_with_next = matches!(s.as_str(), "true" | "yes" | "1");
+                }
+            }
+            "widows" => {
+                if let Some(v) = value_to_f32(value) {
+                    styles.widows = v.max(1.0) as usize;
+                }
+            }
+            "orphans" => {
+                if let Some(v) = value_to_f32(value) {
+                    styles.orphans = v.max(1.0) as usize;
+                }
+            }
+            "allow-row-split" => {
+                if let Value::Str(s) = value {
+                    styles.allow_row_split = matches!(s.as_str(), "true" | "yes" | "1");
                 }
             }
             "display" => {
@@ -194,6 +241,30 @@ fn apply_attrs(styles: &mut ResolvedStyles, block: &Block) {
                     styles.row_gap = v;
                 }
             }
+            "float" => {
+                if let Value::Str(s) = value {
+                    styles.float = match s.as_str() {
+                        "left" => FloatMode::Left,
+                        "right" => FloatMode::Right,
+                        _ => FloatMode::None,
+                    };
+                }
+            }
+            "anchor" => {
+                if let Value::Str(s) = value {
+                    styles.anchor = Some(s.clone());
+                }
+            }
+            "page-header" => {
+                if let Value::Str(s) = value {
+                    styles.page_header = Some(s.clone());
+                }
+            }
+            "page-footer" => {
+                if let Value::Str(s) = value {
+                    styles.page_footer = Some(s.clone());
+                }
+            }
             _ => {}
         }
     }
@@ -213,4 +284,41 @@ fn value_to_color(value: &Value) -> Option<Color> {
         Value::Color(s) | Value::Str(s) => Color::from_str(s),
         _ => None,
     }
+}
+
+fn flatten_inline(
+    nodes: &[InlineNode],
+    bold: bool,
+    italic: bool,
+    link: Option<&str>,
+) -> Vec<InlineRun> {
+    let mut out = Vec::new();
+    for node in nodes {
+        match node {
+            InlineNode::TextRun(text) => out.push(InlineRun {
+                text: text.clone(),
+                bold,
+                italic,
+                code: false,
+                link: link.map(|s| s.to_string()),
+            }),
+            InlineNode::CodeSpan(text) => out.push(InlineRun {
+                text: text.clone(),
+                bold,
+                italic,
+                code: true,
+                link: link.map(|s| s.to_string()),
+            }),
+            InlineNode::Emphasis(children) => {
+                out.extend(flatten_inline(children, bold, true, link));
+            }
+            InlineNode::Strong(children) => {
+                out.extend(flatten_inline(children, true, italic, link));
+            }
+            InlineNode::LinkSpan { text, href } => {
+                out.extend(flatten_inline(text, bold, italic, Some(href)));
+            }
+        }
+    }
+    out
 }

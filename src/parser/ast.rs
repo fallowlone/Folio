@@ -12,8 +12,18 @@ pub enum Value {
 #[derive(Debug, Clone)]
 pub enum Content {
     Text(String),
+    Inline(Vec<InlineNode>),
     Children(Vec<NodeId>),
     Empty,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InlineNode {
+    TextRun(String),
+    Emphasis(Vec<InlineNode>),
+    Strong(Vec<InlineNode>),
+    CodeSpan(String),
+    LinkSpan { text: Vec<InlineNode>, href: String },
 }
 
 pub type NodeId = usize;
@@ -59,6 +69,21 @@ impl Document {
             Content::Children(children) => children,
             _ => &[],
         }
+    }
+
+    pub fn inline_text(nodes: &[InlineNode]) -> String {
+        let mut out = String::new();
+        for node in nodes {
+            match node {
+                InlineNode::TextRun(s) | InlineNode::CodeSpan(s) => out.push_str(s),
+                InlineNode::Emphasis(children)
+                | InlineNode::Strong(children)
+                | InlineNode::LinkSpan { text: children, .. } => {
+                    out.push_str(&Self::inline_text(children));
+                }
+            }
+        }
+        out
     }
 
     pub(crate) fn for_each_block_mut<F>(&mut self, mut f: F)

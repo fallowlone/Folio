@@ -5,6 +5,8 @@ pub mod layout;
 pub mod text;
 pub mod paginate;
 pub mod backend;
+pub mod counters;
+pub mod introspection;
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -44,14 +46,30 @@ pub fn render(doc: &Document, options: ExportOptions) -> Vec<u8> {
         return cached;
     }
 
-    let styled = resolver::build_styled_tree(doc);
-    let layout = layout::compute_layout(&styled);
-    let pages  = paginate::paginate(&layout, &styled);
+    let mut pass = 0usize;
+    let max_passes = 2usize;
+    let mut last_fp: Option<u64> = None;
+    let mut bytes = Vec::new();
 
-    let bytes = match options.format {
-        ExportFormat::Pdf => backend::pdf::render(&pages),
-        ExportFormat::Svg => backend::svg::render(&pages).into_bytes(),
-    };
+    while pass < max_passes {
+        let styled = resolver::build_styled_tree(doc);
+        let _heading_counters = counters::collect_heading_counters(&styled);
+        let layout = layout::compute_layout(&styled);
+        let pages  = paginate::paginate(&layout, &styled);
+        let _introspection = introspection::build_page_introspection(&layout, &pages);
+
+        bytes = match options.format {
+            ExportFormat::Pdf => backend::pdf::render(&pages),
+            ExportFormat::Svg => backend::svg::render(&pages).into_bytes(),
+        };
+
+        let fp = stable_hash_bytes(&bytes);
+        if last_fp == Some(fp) {
+            break;
+        }
+        last_fp = Some(fp);
+        pass += 1;
+    }
 
     cache_render(key, &bytes);
     bytes
@@ -121,6 +139,10 @@ fn hash_block(doc: &Document, id: NodeId, hasher: &mut DefaultHasher) {
             1u8.hash(hasher);
             t.hash(hasher);
         }
+        Content::Inline(nodes) => {
+            4u8.hash(hasher);
+            Document::inline_text(nodes).hash(hasher);
+        }
         Content::Children(children) => {
             2u8.hash(hasher);
             for &child in children {
@@ -157,4 +179,10 @@ fn hash_value(v: &Value, hasher: &mut DefaultHasher) {
             s.hash(hasher);
         }
     }
+}
+
+fn stable_hash_bytes(bytes: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
 }

@@ -86,12 +86,27 @@ pub struct ResolvedStyles {
     pub width: Option<f32>,
     /// Высота блока (если задана явно)
     pub height: Option<f32>,
+    pub min_width: Option<f32>,
+    pub max_width: Option<f32>,
+    pub min_height: Option<f32>,
+    pub max_height: Option<f32>,
 
     /// Межстрочный интервал (коэффициент × font_size)
     pub line_height: f32,
 
     /// Выравнивание текста
     pub text_align: TextAlign,
+    /// Добавочное расстояние между буквами (pt)
+    pub letter_spacing: f32,
+    /// Добавочное расстояние между словами (pt)
+    pub word_spacing: f32,
+    /// Принудительный justify для текстовых блоков
+    pub justify: bool,
+    pub keep_together: bool,
+    pub keep_with_next: bool,
+    pub widows: usize,
+    pub orphans: usize,
+    pub allow_row_split: bool,
 
     /// Тип дисплея (block / grid / flex)
     pub display: Display,
@@ -108,6 +123,10 @@ pub struct ResolvedStyles {
 
     /// Стиль нумерации списка
     pub list_style: ListStyle,
+    pub float: FloatMode,
+    pub anchor: Option<String>,
+    pub page_header: Option<String>,
+    pub page_footer: Option<String>,
 }
 
 impl Default for ResolvedStyles {
@@ -123,14 +142,30 @@ impl Default for ResolvedStyles {
             padding: EdgeInsets::zero(),
             width: None,
             height: None,
+            min_width: None,
+            max_width: None,
+            min_height: None,
+            max_height: None,
             line_height: 1.3,
             text_align: TextAlign::Left,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            justify: false,
+            keep_together: false,
+            keep_with_next: false,
+            widows: 2,
+            orphans: 2,
+            allow_row_split: false,
             display: Display::Block,
             grid_columns: None,
             column_gap: 4.0,
             row_gap: 2.0,
             flex_grow: 0.0,
             list_style: ListStyle::Bullet,
+            float: FloatMode::None,
+            anchor: None,
+            page_header: None,
+            page_footer: None,
         }
     }
 }
@@ -194,8 +229,18 @@ impl ResolvedStyles {
 #[derive(Debug, Clone)]
 pub enum BoxContent {
     Text(String),
+    Inline(Vec<InlineRun>),
     Children(Vec<NodeId>),
     Empty,
+}
+
+#[derive(Debug, Clone)]
+pub struct InlineRun {
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub code: bool,
+    pub link: Option<String>,
 }
 
 /// Основная единица Styled Tree.
@@ -307,4 +352,11 @@ pub enum Display {
     Grid,
     Flex,
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FloatMode {
+    None,
+    Left,
+    Right,
 }

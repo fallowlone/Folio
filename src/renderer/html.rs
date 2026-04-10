@@ -362,6 +362,7 @@ fn has_children(block: &Block) -> bool {
 fn extract_text(block: &Block) -> String {
     match &block.content {
         Content::Text(s) => s.clone(),
+        Content::Inline(nodes) => Document::inline_text(nodes),
         Content::Empty => String::new(),
         Content::Children(_) => String::new(),
     }

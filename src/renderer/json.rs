@@ -57,6 +57,7 @@ fn render_block(block: &Block, doc: &Document, indent: usize) -> String {
 fn render_content(content: &Content, doc: &Document, indent: usize) -> String {
     match content {
         Content::Text(s) => format!("\"{}\"", s.replace('"', "\\\"")),
+        Content::Inline(nodes) => format!("\"{}\"", Document::inline_text(nodes).replace('"', "\\\"")),
         Content::Empty => "null".into(),
         Content::Children(blocks) => {
             let pad = "  ".repeat(indent);

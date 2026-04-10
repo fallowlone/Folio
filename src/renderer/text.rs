@@ -49,6 +49,7 @@ fn render_children(block: &Block, doc: &Document, out: &mut String, depth: usize
 fn extract_text(block: &Block) -> String {
     match &block.content {
         Content::Text(s) => s.clone(),
+        Content::Inline(nodes) => Document::inline_text(nodes),
         Content::Empty => String::new(),
         Content::Children(_) => String::new(),
     }

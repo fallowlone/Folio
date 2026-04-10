@@ -48,6 +48,37 @@ pub trait PainterBackend {
     fn render_document(&self, doc: &PaintDocument) -> Vec<u8>;
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BackendCapabilities {
+    pub text: bool,
+    pub mixed_inline: bool,
+    pub rect: bool,
+    pub line: bool,
+}
+
+pub fn capability_matrix() -> [(&'static str, BackendCapabilities); 2] {
+    [
+        (
+            "pdf",
+            BackendCapabilities {
+                text: true,
+                mixed_inline: true,
+                rect: true,
+                line: true,
+            },
+        ),
+        (
+            "svg",
+            BackendCapabilities {
+                text: true,
+                mixed_inline: true,
+                rect: true,
+                line: true,
+            },
+        ),
+    ]
+}
+
 pub fn from_page_tree(page_tree: &PageTree) -> PaintDocument {
     let pages = page_tree.pages.iter()
         .map(|page| PaintedPage {

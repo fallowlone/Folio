@@ -1,4 +1,4 @@
-use crate::parser::ast::{Content, Document, NodeId, Value};
+use crate::parser::ast::{Content, Document, InlineNode, NodeId, Value};
 
 /// Assign IDs to all blocks in the document.
 /// Explicit IDs (non-empty block.id) are kept as-is.
@@ -46,6 +46,7 @@ fn compute_auto_id(node_id: NodeId, doc: &Document) -> String {
     // Build content string
     let content_str = match &block.content {
         Content::Text(s) => s.clone(),
+        Content::Inline(nodes) => serialize_inline(nodes),
         Content::Children(children) => {
             // Children already have IDs (bottom-up processing)
             children.iter()
@@ -60,6 +61,41 @@ fn compute_auto_id(node_id: NodeId, doc: &Document) -> String {
     let hash = fnv1a(&input);
     // Use lower 32 bits -> 8 hex chars
     format!("{}_{:08x}", block.kind.to_lowercase(), hash as u32)
+}
+
+fn serialize_inline(nodes: &[InlineNode]) -> String {
+    let mut out = String::new();
+    for node in nodes {
+        match node {
+            InlineNode::TextRun(s) => {
+                out.push_str("t:");
+                out.push_str(s);
+            }
+            InlineNode::CodeSpan(s) => {
+                out.push_str("c:");
+                out.push_str(s);
+            }
+            InlineNode::Emphasis(children) => {
+                out.push_str("e(");
+                out.push_str(&serialize_inline(children));
+                out.push(')');
+            }
+            InlineNode::Strong(children) => {
+                out.push_str("s(");
+                out.push_str(&serialize_inline(children));
+                out.push(')');
+            }
+            InlineNode::LinkSpan { text, href } => {
+                out.push_str("l(");
+                out.push_str(&serialize_inline(text));
+                out.push_str("->");
+                out.push_str(href);
+                out.push(')');
+            }
+        }
+        out.push('|');
+    }
+    out
 }
 
 fn serialize_value(v: &Value) -> String {

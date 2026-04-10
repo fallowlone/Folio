@@ -7,7 +7,7 @@
 
 use taffy::prelude::*;
 use super::arena::{DocumentArena, NodeId as ArenaNodeId};
-use super::styles::{BoxContent, BoxKind, Display};
+use super::styles::{BoxContent, BoxKind, Display, InlineRun};
 
 // ─── Константы ────────────────────────────────────────────────────────────────
 
@@ -32,6 +32,7 @@ pub type LayoutNodeIdx = usize;
 #[derive(Debug, Clone)]
 pub enum LayoutContent {
     Text(String),
+    Inline(Vec<InlineRun>),
     Children(Vec<LayoutNodeIdx>),
     Empty,
 }
@@ -130,7 +131,7 @@ fn build_taffy_node(
     let style = styled_box_to_taffy_style(&node.styles, &node.kind);
 
     match &node.content {
-        BoxContent::Text(_) | BoxContent::Empty => {
+        BoxContent::Text(_) | BoxContent::Inline(_) | BoxContent::Empty => {
             // Листовой текстовый узел.
             // Высоту считаем через measure-function в compute_layout_with_measure;
             // для простоты v2 используем фиксированную высоту на строку.
@@ -190,6 +191,15 @@ fn styled_box_to_taffy_style(styles: &super::styles::ResolvedStyles, kind: &BoxK
         None    => Dimension::auto(),
     };
 
+    let min_size = Size {
+        width: styles.min_width.map(|v| v * MM_TO_PT).map(Dimension::length).unwrap_or(Dimension::auto()),
+        height: styles.min_height.map(|v| v * MM_TO_PT).map(Dimension::length).unwrap_or(Dimension::auto()),
+    };
+    let max_size = Size {
+        width: styles.max_width.map(|v| v * MM_TO_PT).map(Dimension::length).unwrap_or(Dimension::auto()),
+        height: styles.max_height.map(|v| v * MM_TO_PT).map(Dimension::length).unwrap_or(Dimension::auto()),
+    };
+
     // Для grid-блоков задаём колонки
     let grid_template_columns = if matches!(display, taffy::Display::Grid) {
         let cols = styles.grid_columns.unwrap_or(1);
@@ -210,6 +220,8 @@ fn styled_box_to_taffy_style(styles: &super::styles::ResolvedStyles, kind: &BoxK
     Style {
         display,
         size: Size { width, height },
+        min_size,
+        max_size,
         margin,
         padding,
         gap,
@@ -252,6 +264,7 @@ fn extract_layout(
 
     let content = match &node.content {
         BoxContent::Text(text) => LayoutContent::Text(text.clone()),
+        BoxContent::Inline(runs) => LayoutContent::Inline(runs.clone()),
         BoxContent::Empty => LayoutContent::Empty,
         BoxContent::Children(children) => {
             let taffy_children = taffy.children(taffy_id).unwrap_or_default();

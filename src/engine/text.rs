@@ -12,6 +12,7 @@ use std::collections::hash_map::DefaultHasher;
 use fontdb::{Database, Family, ID, Query, Weight, Style as FontdbStyle, Stretch};
 use rustybuzz::UnicodeBuffer;
 use super::layout::MM_TO_PT;
+use super::styles::InlineRun;
 
 // ─── Глобальный кеш метрик ────────────────────────────────────────────────────
 
@@ -54,6 +55,8 @@ struct BreakTextKey {
     max_width_bits: u32,
     font_size_bits: u32,
     line_height_bits: u32,
+    letter_spacing_bits: u32,
+    word_spacing_bits: u32,
     bold: bool,
 }
 
@@ -156,6 +159,16 @@ pub fn char_advance_pt(ch: char, font_size_pt: f32, bold: bool) -> f32 {
 
 /// Возвращает ширину строки в pt.
 pub fn text_width_pt(text: &str, font_size_pt: f32, bold: bool) -> f32 {
+    text_width_pt_with_spacing(text, font_size_pt, bold, 0.0, 0.0)
+}
+
+pub fn text_width_pt_with_spacing(
+    text: &str,
+    font_size_pt: f32,
+    bold: bool,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+) -> f32 {
     let key = TextWidthKey {
         text_hash: stable_hash(text),
         text_len: text.len(),
@@ -163,16 +176,30 @@ pub fn text_width_pt(text: &str, font_size_pt: f32, bold: bool) -> f32 {
         bold,
     };
 
-    if let Some(cached) = text_width_cache().lock().ok().and_then(|m| m.get(&key).copied()) {
-        return cached;
+    if letter_spacing_pt == 0.0 && word_spacing_pt == 0.0 {
+        if let Some(cached) = text_width_cache().lock().ok().and_then(|m| m.get(&key).copied()) {
+            return cached;
+        }
     }
 
-    if let Some(width) = shape_text_width_pt(text, font_size_pt, bold) {
-        cache_text_width(key, width);
-        return width;
+    let mut width = if let Some(shaped) = shape_text_width_pt(text, font_size_pt, bold) {
+        shaped
+    } else {
+        text.chars().map(|c| char_advance_pt(c, font_size_pt, bold)).sum()
+    };
+
+    if letter_spacing_pt != 0.0 {
+        let count = text.chars().count().saturating_sub(1) as f32;
+        width += letter_spacing_pt * count;
     }
-    let width = text.chars().map(|c| char_advance_pt(c, font_size_pt, bold)).sum();
-    cache_text_width(key, width);
+    if word_spacing_pt != 0.0 {
+        let spaces = text.chars().filter(|c| *c == ' ').count() as f32;
+        width += word_spacing_pt * spaces;
+    }
+
+    if letter_spacing_pt == 0.0 && word_spacing_pt == 0.0 {
+        cache_text_width(key, width);
+    }
     width
 }
 
@@ -220,6 +247,8 @@ pub fn break_text(
     font_size_pt: f32,
     line_height: f32,
     bold: bool,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
 ) -> Vec<TextLine> {
     if text.is_empty() {
         return vec![];
@@ -231,6 +260,8 @@ pub fn break_text(
         max_width_bits: max_width_pt.to_bits(),
         font_size_bits: font_size_pt.to_bits(),
         line_height_bits: line_height.to_bits(),
+        letter_spacing_bits: letter_spacing_pt.to_bits(),
+        word_spacing_bits: word_spacing_pt.to_bits(),
         bold,
     };
     if let Some(cached) = break_text_cache().lock().ok().and_then(|m| m.get(&key).cloned()) {
@@ -248,10 +279,22 @@ pub fn break_text(
 
     for (pos, opportunity) in &break_opportunities {
         let segment = &text[last_pos..*pos];
-        let segment_width = text_width_pt(segment, font_size_pt, bold);
+        let segment_width = text_width_pt_with_spacing(
+            segment,
+            font_size_pt,
+            bold,
+            letter_spacing_pt,
+            word_spacing_pt,
+        );
 
         if current_width + segment_width > max_width_pt && !current_line.is_empty() {
-            let w = text_width_pt(current_line.trim_end(), font_size_pt, bold);
+            let w = text_width_pt_with_spacing(
+                current_line.trim_end(),
+                font_size_pt,
+                bold,
+                letter_spacing_pt,
+                word_spacing_pt,
+            );
             lines.push(TextLine {
                 text: current_line.trim_end().to_string(),
                 width: w.min(max_width_pt),
@@ -266,7 +309,13 @@ pub fn break_text(
         current_width += segment_width;
 
         if *opportunity == unicode_linebreak::BreakOpportunity::Mandatory {
-            let w = text_width_pt(current_line.trim_end(), font_size_pt, bold);
+            let w = text_width_pt_with_spacing(
+                current_line.trim_end(),
+                font_size_pt,
+                bold,
+                letter_spacing_pt,
+                word_spacing_pt,
+            );
             lines.push(TextLine {
                 text: current_line.trim_end().to_string(),
                 width: w.min(max_width_pt),
@@ -281,7 +330,13 @@ pub fn break_text(
     }
 
     if !current_line.trim().is_empty() {
-        let w = text_width_pt(current_line.trim_end(), font_size_pt, bold);
+        let w = text_width_pt_with_spacing(
+            current_line.trim_end(),
+            font_size_pt,
+            bold,
+            letter_spacing_pt,
+            word_spacing_pt,
+        );
         lines.push(TextLine {
             text: current_line.trim_end().to_string(),
             width: w.min(max_width_pt),
@@ -301,6 +356,110 @@ pub fn text_block_height(lines: &[TextLine]) -> f32 {
     }
     let first = &lines[0];
     first.font_size + (lines.len().saturating_sub(1)) as f32 * first.line_height_pt
+}
+
+#[derive(Debug, Clone)]
+pub struct InlineFragment {
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub code: bool,
+    pub link: Option<String>,
+    pub width: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct InlineLine {
+    pub fragments: Vec<InlineFragment>,
+    pub width: f32,
+    pub line_height_pt: f32,
+    pub font_size: f32,
+}
+
+pub fn break_inline_runs(
+    runs: &[InlineRun],
+    max_width_pt: f32,
+    font_size_pt: f32,
+    line_height: f32,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+    justify: bool,
+) -> Vec<InlineLine> {
+    let mut lines: Vec<InlineLine> = Vec::new();
+    let mut current = InlineLine {
+        fragments: Vec::new(),
+        width: 0.0,
+        line_height_pt: font_size_pt * line_height,
+        font_size: font_size_pt,
+    };
+
+    for run in runs {
+        let mut parts = split_preserving_spaces(&run.text);
+        if parts.is_empty() {
+            parts.push(run.text.clone());
+        }
+        for part in parts {
+            let bold = run.bold;
+            let width = text_width_pt_with_spacing(
+                &part,
+                font_size_pt,
+                bold,
+                letter_spacing_pt,
+                word_spacing_pt,
+            );
+
+            let should_wrap = current.width + width > max_width_pt
+                && !current.fragments.is_empty()
+                && !part.trim().is_empty();
+
+            if should_wrap {
+                lines.push(current);
+                current = InlineLine {
+                    fragments: Vec::new(),
+                    width: 0.0,
+                    line_height_pt: font_size_pt * line_height,
+                    font_size: font_size_pt,
+                };
+            }
+
+            current.fragments.push(InlineFragment {
+                text: part.clone(),
+                bold: run.bold,
+                italic: run.italic,
+                code: run.code,
+                link: run.link.clone(),
+                width,
+            });
+            current.width += width;
+        }
+    }
+
+    if !current.fragments.is_empty() {
+        lines.push(current);
+    }
+
+    if justify {
+        let justified_line_count = lines.len().saturating_sub(1);
+        for line in lines.iter_mut().take(justified_line_count) {
+            let spaces = line.fragments.iter()
+                .map(|f| f.text.chars().filter(|c| *c == ' ').count())
+                .sum::<usize>();
+            if spaces == 0 || line.width >= max_width_pt {
+                continue;
+            }
+            let extra = (max_width_pt - line.width) / spaces as f32;
+            for frag in &mut line.fragments {
+                let space_count = frag.text.chars().filter(|c| *c == ' ').count() as f32;
+                if space_count > 0.0 {
+                    let add = extra * space_count;
+                    frag.width += add;
+                    line.width += add;
+                }
+            }
+        }
+    }
+
+    lines
 }
 
 #[allow(dead_code)]
@@ -338,4 +497,31 @@ fn stable_hash(s: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()
+}
+
+fn split_preserving_spaces(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut in_space = false;
+    for ch in s.chars() {
+        if ch.is_whitespace() {
+            if !in_space && !current.is_empty() {
+                out.push(current.clone());
+                current.clear();
+            }
+            in_space = true;
+            current.push(ch);
+        } else {
+            if in_space && !current.is_empty() {
+                out.push(current.clone());
+                current.clear();
+            }
+            in_space = false;
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
 }

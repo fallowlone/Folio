@@ -83,6 +83,7 @@ PAGE(
 - [x] AST переведён на arena-модель (`NodeId`, `Content::Children`)
 - [x] `id::assign_ids` переведён на post-order обход по ID
 - [x] API AST очищен: внешние модули используют методы `Document`, а не внутренние поля arena
+- [x] Inline AST v1: `TextRun`, `Emphasis`, `Strong`, `CodeSpan`, `LinkSpan`
 
 ---
 
@@ -97,6 +98,12 @@ PAGE(
 - [x] PDF backend на `pdf-writer`
 - [x] Каркас Painter API
 - [x] WGPU backend scaffold под feature `wgpu-preview` (stub)
+- [x] Inline layout v1: line builder по run-ам + mixed-style rendering (PDF/SVG)
+- [x] Typography v1: `letter-spacing`, `word-spacing`, базовый `justify`
+- [x] Pagination rules v2 (base): `keep-with-next`, `keep-together`, row split policy switch
+- [x] Global deps foundation: multi-pass convergence guard + `counters`/`introspection` модули
+- [x] Advanced layout foundation: min/max constraints, float mode (left/right), page header/footer
+- [x] Export parity quality gates: capability matrix + integration smoke tests + cache regression test
 
 ---
 

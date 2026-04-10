@@ -6,7 +6,7 @@ pub mod resolver;
 mod tests;
 
 use std::collections::HashMap;
-use ast::{Block, Content, Document, NodeId, Value};
+use ast::{Block, Content, Document, InlineNode, NodeId, Value};
 use crate::lexer::token::Token;
 
 pub struct Parser {
@@ -175,7 +175,7 @@ impl Parser {
             Token::RParen => Ok(Content::Empty),
             Token::Text(s) => {
                 self.advance()?;
-                Ok(Content::Text(s))
+                Ok(Content::Inline(parse_inline_nodes(&s)))
             }
             Token::Ident(_) => {
                 // nested blocks
@@ -200,4 +200,85 @@ impl Parser {
             }
         }
     }
+}
+
+fn parse_inline_nodes(input: &str) -> Vec<InlineNode> {
+    fn advance_char_boundary(s: &str, i: usize) -> usize {
+        i + s[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1)
+    }
+
+    fn parse_segment(s: &str) -> Vec<InlineNode> {
+        let mut out = Vec::new();
+        let mut i = 0usize;
+
+        while i < s.len() {
+            if s[i..].starts_with("**") {
+                if let Some(close_rel) = s[i + 2..].find("**") {
+                    let inner = &s[i + 2..i + 2 + close_rel];
+                    out.push(InlineNode::Strong(parse_segment(inner)));
+                    i += 4 + close_rel;
+                    continue;
+                }
+            }
+
+            if s[i..].starts_with('*') {
+                if let Some(close_rel) = s[i + 1..].find('*') {
+                    let inner = &s[i + 1..i + 1 + close_rel];
+                    out.push(InlineNode::Emphasis(parse_segment(inner)));
+                    i += 2 + close_rel;
+                    continue;
+                }
+            }
+
+            if s[i..].starts_with('`') {
+                if let Some(close_rel) = s[i + 1..].find('`') {
+                    let inner = &s[i + 1..i + 1 + close_rel];
+                    out.push(InlineNode::CodeSpan(inner.to_string()));
+                    i += 2 + close_rel;
+                    continue;
+                }
+            }
+
+            if s[i..].starts_with('[') {
+                if let Some(close_text_rel) = s[i + 1..].find(']') {
+                    let text_end = i + 1 + close_text_rel;
+                    if s[text_end + 1..].starts_with('(') {
+                        if let Some(close_href_rel) = s[text_end + 2..].find(')') {
+                            let text_inner = &s[i + 1..text_end];
+                            let href_inner = &s[text_end + 2..text_end + 2 + close_href_rel];
+                            out.push(InlineNode::LinkSpan {
+                                text: parse_segment(text_inner),
+                                href: href_inner.to_string(),
+                            });
+                            i = text_end + 3 + close_href_rel;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            let mut next = advance_char_boundary(s, i);
+            while next < s.len()
+                && !s[next..].starts_with("**")
+                && !s[next..].starts_with('*')
+                && !s[next..].starts_with('`')
+                && !s[next..].starts_with('[')
+            {
+                next = advance_char_boundary(s, next);
+            }
+
+            let chunk = &s[i..next];
+            if !chunk.is_empty() {
+                out.push(InlineNode::TextRun(chunk.to_string()));
+            }
+            i = next;
+        }
+
+        if out.is_empty() {
+            out.push(InlineNode::TextRun(String::new()));
+        }
+        out
+    }
+
+    parse_segment(input)
 }

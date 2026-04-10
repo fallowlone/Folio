@@ -6,8 +6,8 @@
 
 use super::layout::{LayoutContent, LayoutNodeIdx, LayoutTree,
                     A4_HEIGHT_PT, A4_WIDTH_PT, PAGE_MARGIN_PT, MM_TO_PT, CONTENT_WIDTH_PT};
-use super::styles::{BoxKind, Color, FontStyle, FontWeight, ListStyle};
-use super::text::{break_text, text_block_height};
+use super::styles::{BoxKind, Color, FloatMode, FontStyle, FontWeight, ListStyle};
+use super::text::{break_inline_runs, break_text, text_block_height};
 
 // ─── Команды отрисовки ────────────────────────────────────────────────────────
 
@@ -86,20 +86,58 @@ struct Paginator<'a> {
     cursor_y:          f32,
     /// Счётчик для текущего нумерованного списка (None = маркированный)
     list_item_counter: Option<usize>,
+    page_header:       Option<String>,
+    page_footer:       Option<String>,
 }
 
 impl<'a> Paginator<'a> {
     fn new(layout: &'a LayoutTree, styled: &'a super::arena::DocumentArena) -> Self {
-        Self { layout, styled, pages: vec![Page::new()], cursor_y: CONTENT_TOP, list_item_counter: None }
+        Self {
+            layout,
+            styled,
+            pages: vec![Page::new()],
+            cursor_y: CONTENT_TOP,
+            list_item_counter: None,
+            page_header: None,
+            page_footer: None,
+        }
     }
 
     fn new_page(&mut self) {
         self.pages.push(Page::new());
         self.cursor_y = CONTENT_TOP;
+        self.draw_page_chrome();
     }
 
     fn push_cmd(&mut self, cmd: DrawCommand) {
         self.pages.last_mut().unwrap().commands.push(cmd);
+    }
+
+    fn draw_page_chrome(&mut self) {
+        if let Some(header) = &self.page_header {
+            self.push_cmd(DrawCommand::Text {
+                content: header.clone(),
+                x: PAGE_MARGIN_PT,
+                y: PAGE_MARGIN_PT * 0.65,
+                font_size: 9.0,
+                font_family: "Helvetica".to_string(),
+                bold: false,
+                italic: false,
+                color: Color::from_hex(0x6B7280),
+            });
+        }
+        if let Some(footer) = &self.page_footer {
+            self.push_cmd(DrawCommand::Text {
+                content: footer.clone(),
+                x: PAGE_MARGIN_PT,
+                y: A4_HEIGHT_PT - PAGE_MARGIN_PT * 0.35,
+                font_size: 9.0,
+                font_family: "Helvetica".to_string(),
+                bold: false,
+                italic: false,
+                color: Color::from_hex(0x6B7280),
+            });
+        }
     }
 
     // ─── Размещение произвольного узла ─────────────────────────────────────
@@ -111,13 +149,18 @@ impl<'a> Paginator<'a> {
         let margin_top    = styles.margin.top    * MM_TO_PT;
         let margin_bottom = styles.margin.bottom * MM_TO_PT;
         let padding_left  = styles.padding.left  * MM_TO_PT;
+        let block_x = match styles.float {
+            FloatMode::Left => PAGE_MARGIN_PT,
+            FloatMode::Right => (A4_WIDTH_PT - PAGE_MARGIN_PT - node.width.max(1.0)).max(PAGE_MARGIN_PT),
+            FloatMode::None => node.x,
+        };
 
         self.cursor_y += margin_top;
 
         if let Some(bg) = styles.background {
             let estimated_h = self.estimate_height(node_idx);
             self.push_cmd(DrawCommand::Rect {
-                x: node.x,
+                x: block_x,
                 y: self.cursor_y,
                 w: node.width.max(CONTENT_WIDTH_PT),
                 h: estimated_h,
@@ -137,7 +180,15 @@ impl<'a> Paginator<'a> {
                 }
 
                 let width = node.width.max(CONTENT_WIDTH_PT * 0.3);
-                let lines = break_text(&text, width, styles.font_size, styles.line_height, bold);
+                let lines = break_text(
+                    &text,
+                    width,
+                    styles.font_size,
+                    styles.line_height,
+                    bold,
+                    styles.letter_spacing,
+                    styles.word_spacing,
+                );
                 let block_h = text_block_height(&lines);
 
                 if self.cursor_y + block_h > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
@@ -149,7 +200,7 @@ impl<'a> Paginator<'a> {
                     if y > CONTENT_BOTTOM { break; }
                     self.push_cmd(DrawCommand::Text {
                         content: line.text.clone(),
-                        x: node.x + padding_left,
+                            x: block_x + padding_left,
                         y,
                         font_size: styles.font_size,
                         font_family: styles.font_family.clone(),
@@ -158,6 +209,67 @@ impl<'a> Paginator<'a> {
                         color: styles.color,
                     });
                 }
+                self.cursor_y += block_h;
+                block_h
+            }
+            LayoutContent::Inline(runs) => {
+                let width = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let lines = break_inline_runs(
+                    &runs,
+                    width,
+                    styles.font_size,
+                    styles.line_height,
+                    styles.letter_spacing,
+                    styles.word_spacing,
+                    styles.justify || styles.text_align == super::styles::TextAlign::Justify,
+                );
+                let block_h = if lines.is_empty() {
+                    0.0
+                } else {
+                    styles.font_size + (lines.len().saturating_sub(1)) as f32 * (styles.font_size * styles.line_height)
+                };
+
+                if self.cursor_y + block_h > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
+                    self.new_page();
+                }
+
+                for (line_idx, line) in lines.iter().enumerate() {
+                    let baseline_y = self.cursor_y + styles.font_size + line_idx as f32 * line.line_height_pt;
+                    if baseline_y > CONTENT_BOTTOM {
+                        break;
+                    }
+                    let mut x_cursor = block_x + padding_left;
+                    for frag in &line.fragments {
+                        let frag_font_family = if frag.code {
+                            "Courier".to_string()
+                        } else {
+                            styles.font_family.clone()
+                        };
+                        self.push_cmd(DrawCommand::Text {
+                            content: frag.text.clone(),
+                            x: x_cursor,
+                            y: baseline_y,
+                            font_size: styles.font_size,
+                            font_family: frag_font_family,
+                            bold: bold || frag.bold,
+                            italic: (styles.font_style == FontStyle::Italic) || frag.italic,
+                            color: if frag.link.is_some() { Color::from_hex(0x1D4ED8) } else { styles.color },
+                        });
+                        if frag.link.is_some() && !frag.text.trim().is_empty() {
+                            let underline_y = baseline_y + 1.0;
+                            self.push_cmd(DrawCommand::Line {
+                                x1: x_cursor,
+                                y1: underline_y,
+                                x2: x_cursor + frag.width.max(0.0),
+                                y2: underline_y,
+                                color: Color::from_hex(0x1D4ED8),
+                                width: 0.5,
+                            });
+                        }
+                        x_cursor += frag.width;
+                    }
+                }
+
                 self.cursor_y += block_h;
                 block_h
             }
@@ -191,7 +303,7 @@ impl<'a> Paginator<'a> {
 
             LayoutContent::Empty => {
                 if matches!(node.kind, BoxKind::Hr) {
-                    let x = node.x;
+                    let x = block_x;
                     let w = node.width.max(CONTENT_WIDTH_PT);
                     self.push_cmd(DrawCommand::Line {
                         x1: x,
@@ -223,7 +335,15 @@ impl<'a> Paginator<'a> {
         let styles = self.styled.get(node.arena_id).styles.clone();
         let bold = styles.font_weight == FontWeight::Bold;
 
-        let lines = break_text(text, node.width.max(1.0), styles.font_size, styles.line_height, bold);
+        let lines = break_text(
+            text,
+            node.width.max(1.0),
+            styles.font_size,
+            styles.line_height,
+            bold,
+            styles.letter_spacing,
+            styles.word_spacing,
+        );
         let block_h = text_block_height(&lines);
 
         if self.cursor_y + block_h > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
@@ -335,16 +455,48 @@ impl<'a> Paginator<'a> {
                 match &cell.content {
                     LayoutContent::Text(t) => {
                         let w = cell.width.max(1.0);
-                        let lines = break_text(t, w, cell_styles.font_size, cell_styles.line_height, bold);
+                        let lines = break_text(
+                            t,
+                            w,
+                            cell_styles.font_size,
+                            cell_styles.line_height,
+                            bold,
+                            cell_styles.letter_spacing,
+                            cell_styles.word_spacing,
+                        );
                         text_block_height(&lines)
                             + cell_styles.padding.top    * MM_TO_PT
                             + cell_styles.padding.bottom * MM_TO_PT
+                    }
+                    LayoutContent::Inline(runs) => {
+                        let w = cell.width.max(1.0);
+                        let lines = break_inline_runs(
+                            runs,
+                            w,
+                            cell_styles.font_size,
+                            cell_styles.line_height,
+                            cell_styles.letter_spacing,
+                            cell_styles.word_spacing,
+                            cell_styles.justify,
+                        );
+                        if lines.is_empty() {
+                            0.0
+                        } else {
+                            cell_styles.font_size
+                                + (lines.len().saturating_sub(1)) as f32
+                                    * (cell_styles.font_size * cell_styles.line_height)
+                                + cell_styles.padding.top * MM_TO_PT
+                                + cell_styles.padding.bottom * MM_TO_PT
+                        }
                     }
                     _ => 0.0,
                 }
             }).fold(0.0f32, f32::max).max(12.0);
 
-            if self.cursor_y + row_height > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
+            if !row_styles.allow_row_split
+                && self.cursor_y + row_height > CONTENT_BOTTOM
+                && self.cursor_y > CONTENT_TOP
+            {
                 self.new_page();
             }
 
@@ -385,24 +537,71 @@ impl<'a> Paginator<'a> {
                     });
                 }
 
-                if let LayoutContent::Text(text) = &cell.content {
-                    let w = cell.width.max(1.0);
-                    let lines = break_text(text, w, cell_styles.font_size, cell_styles.line_height, bold);
-                    for (i, line) in lines.iter().enumerate() {
-                        let y = row_start_y + padding_top + cell_styles.font_size
-                                + i as f32 * line.line_height_pt;
-                        if y > CONTENT_BOTTOM { break; }
-                        self.push_cmd(DrawCommand::Text {
-                            content: line.text.clone(),
-                            x: cell.x + padding_left,
-                            y,
-                            font_size: cell_styles.font_size,
-                            font_family: cell_styles.font_family.clone(),
+                match &cell.content {
+                    LayoutContent::Text(text) => {
+                        let w = cell.width.max(1.0);
+                        let lines = break_text(
+                            text,
+                            w,
+                            cell_styles.font_size,
+                            cell_styles.line_height,
                             bold,
-                            italic: cell_styles.font_style == FontStyle::Italic,
-                            color: cell_styles.color,
-                        });
+                            cell_styles.letter_spacing,
+                            cell_styles.word_spacing,
+                        );
+                        for (i, line) in lines.iter().enumerate() {
+                            let y = row_start_y + padding_top + cell_styles.font_size
+                                + i as f32 * line.line_height_pt;
+                            if y > CONTENT_BOTTOM { break; }
+                            self.push_cmd(DrawCommand::Text {
+                                content: line.text.clone(),
+                                x: cell.x + padding_left,
+                                y,
+                                font_size: cell_styles.font_size,
+                                font_family: cell_styles.font_family.clone(),
+                                bold,
+                                italic: cell_styles.font_style == FontStyle::Italic,
+                                color: cell_styles.color,
+                            });
+                        }
                     }
+                    LayoutContent::Inline(runs) => {
+                        let w = cell.width.max(1.0);
+                        let lines = break_inline_runs(
+                            runs,
+                            w,
+                            cell_styles.font_size,
+                            cell_styles.line_height,
+                            cell_styles.letter_spacing,
+                            cell_styles.word_spacing,
+                            cell_styles.justify,
+                        );
+                        for (i, line) in lines.iter().enumerate() {
+                            let baseline_y = row_start_y + padding_top + cell_styles.font_size
+                                + i as f32 * line.line_height_pt;
+                            if baseline_y > CONTENT_BOTTOM { break; }
+                            let mut x_cursor = cell.x + padding_left;
+                            for frag in &line.fragments {
+                                let font_family = if frag.code {
+                                    "Courier".to_string()
+                                } else {
+                                    cell_styles.font_family.clone()
+                                };
+                                self.push_cmd(DrawCommand::Text {
+                                    content: frag.text.clone(),
+                                    x: x_cursor,
+                                    y: baseline_y,
+                                    font_size: cell_styles.font_size,
+                                    font_family,
+                                    bold: bold || frag.bold,
+                                    italic: (cell_styles.font_style == FontStyle::Italic) || frag.italic,
+                                    color: if frag.link.is_some() { Color::from_hex(0x1D4ED8) } else { cell_styles.color },
+                                });
+                                x_cursor += frag.width;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -443,8 +642,35 @@ impl<'a> Paginator<'a> {
         match &node.content {
             LayoutContent::Text(t) => {
                 let w = node.width.max(CONTENT_WIDTH_PT * 0.3);
-                let lines = break_text(t, w, styles.font_size, styles.line_height, bold);
+                let lines = break_text(
+                    t,
+                    w,
+                    styles.font_size,
+                    styles.line_height,
+                    bold,
+                    styles.letter_spacing,
+                    styles.word_spacing,
+                );
                 text_block_height(&lines)
+            }
+            LayoutContent::Inline(runs) => {
+                let w = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let lines = break_inline_runs(
+                    runs,
+                    w,
+                    styles.font_size,
+                    styles.line_height,
+                    styles.letter_spacing,
+                    styles.word_spacing,
+                    styles.justify,
+                );
+                if lines.is_empty() {
+                    0.0
+                } else {
+                    styles.font_size
+                        + (lines.len().saturating_sub(1)) as f32
+                            * (styles.font_size * styles.line_height)
+                }
             }
             LayoutContent::Children(children) => {
                 children.iter().map(|&ci| self.estimate_height(ci)).sum()
@@ -461,11 +687,30 @@ pub fn paginate(layout: &LayoutTree, styled: &super::arena::DocumentArena) -> Pa
 
     for &root_idx in &layout.roots {
         let node = &layout.nodes[root_idx];
+        let root_styles = styled.get(node.arena_id).styles.clone();
+        pager.page_header = root_styles.page_header.clone();
+        pager.page_footer = root_styles.page_footer.clone();
+        pager.draw_page_chrome();
         match &node.content {
             LayoutContent::Children(children) => {
                 let children = children.clone();
-                for child_idx in children {
-                    pager.place_node(child_idx);
+                for (idx, child_idx) in children.iter().enumerate() {
+                    let child_node = &layout.nodes[*child_idx];
+                    let child_styles = styled.get(child_node.arena_id).styles.clone();
+                    if child_styles.keep_with_next && idx + 1 < children.len() {
+                        let h1 = pager.estimate_height(*child_idx);
+                        let h2 = pager.estimate_height(children[idx + 1]);
+                        let remaining = CONTENT_BOTTOM - pager.cursor_y;
+                        if h1 + h2 > remaining && pager.cursor_y > CONTENT_TOP {
+                            pager.new_page();
+                        }
+                    } else if child_styles.keep_together {
+                        let h = pager.estimate_height(*child_idx);
+                        if h > (CONTENT_BOTTOM - pager.cursor_y) && pager.cursor_y > CONTENT_TOP {
+                            pager.new_page();
+                        }
+                    }
+                    pager.place_node(*child_idx);
                 }
             }
             _ => { pager.place_node(root_idx); }
