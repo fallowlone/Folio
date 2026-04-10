@@ -47,8 +47,12 @@ pub fn render(page_tree: &PageTree) -> Vec<u8> {
     }
 
     // ─── Шрифты (встроенные Type1) ────────────────────────────────────────────
-    pdf.type1_font(font_regular_id).base_font(Name(b"Helvetica"));
-    pdf.type1_font(font_bold_id).base_font(Name(b"Helvetica-Bold"));
+    pdf.type1_font(font_regular_id)
+        .base_font(Name(b"Helvetica"))
+        .encoding_predefined(Name(b"WinAnsiEncoding"));
+    pdf.type1_font(font_bold_id)
+        .base_font(Name(b"Helvetica-Bold"))
+        .encoding_predefined(Name(b"WinAnsiEncoding"));
 
     // ─── Страницы ─────────────────────────────────────────────────────────────
     for (i, page) in page_tree.pages.iter().enumerate() {
