@@ -47,8 +47,11 @@ pub fn render(page_tree: &PageTree) -> Vec<u8> {
     }
 
     // ─── Шрифты (встроенные Type1) ────────────────────────────────────────────
-    pdf.type1_font(font_regular_id).base_font(Name(b"Helvetica"));
-    pdf.type1_font(font_bold_id).base_font(Name(b"Helvetica-Bold"));
+    // WinAnsiEncoding обязателен: encode_latin1 пишет байты 0x80–0x9F (cp1252).
+    // Без явного Encoding PDF viewer использует StandardEncoding, где 0x91–0x97
+    // не определены — смарт-кавычки, тире и буллиты рендерятся как пустые глифы.
+    pdf.type1_font(font_regular_id).base_font(Name(b"Helvetica")).encoding_predefined(Name(b"WinAnsiEncoding"));
+    pdf.type1_font(font_bold_id).base_font(Name(b"Helvetica-Bold")).encoding_predefined(Name(b"WinAnsiEncoding"));
 
     // ─── Страницы ─────────────────────────────────────────────────────────────
     for (i, page) in page_tree.pages.iter().enumerate() {
