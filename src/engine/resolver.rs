@@ -8,7 +8,7 @@ use crate::parser::ast::{Block, Content, Document, Value};
 use super::arena::DocumentArena;
 use super::styles::{
     BoxContent, BoxKind, Color, Display, EdgeInsets, FontStyle, FontWeight,
-    ResolvedStyles, StyledBox, TextAlign,
+    ListStyle, ResolvedStyles, StyledBox, TextAlign,
 };
 
 /// Основная точка входа.
@@ -171,6 +171,14 @@ fn apply_attrs(styles: &mut ResolvedStyles, block: &Block) {
             "flex-grow" | "grow" => {
                 if let Some(v) = value_to_f32(value) {
                     styles.flex_grow = v;
+                }
+            }
+            "type" | "list-type" => {
+                if let Value::Str(s) = value {
+                    styles.list_style = match s.as_str() {
+                        "ordered" | "ol" | "numbered" => ListStyle::Ordered,
+                        _ => ListStyle::Bullet,
+                    };
                 }
             }
             "columns" | "grid-columns" => {
