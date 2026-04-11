@@ -51,8 +51,14 @@ fn render_block(block: &Block, doc: &Document, out: &mut String, depth: usize) {
             render_children(block, doc, out, depth);
         }
         "CELL" => {
-            let t = extract_text(block);
-            out.push_str(&format!("  · {}\n", t));
+            if has_children(block) {
+                render_children(block, doc, out, depth);
+            } else {
+                let t = extract_text(block);
+                if !t.is_empty() {
+                    out.push_str(&format!("  · {}\n", t));
+                }
+            }
         }
         "FIGURE" => {
             out.push_str("[figure]\n");
@@ -95,11 +101,45 @@ fn render_children(block: &Block, doc: &Document, out: &mut String, depth: usize
     }
 }
 
+fn has_children(block: &Block) -> bool {
+    matches!(&block.content, Content::Children(children) if !children.is_empty())
+}
+
 fn extract_text(block: &Block) -> String {
     match &block.content {
         Content::Text(s) => s.clone(),
         Content::Inline(nodes) => Document::inline_text(nodes),
         Content::Empty => String::new(),
         Content::Children(_) => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+    use crate::parser::{id, resolver, Parser};
+
+    fn parse(input: &str) -> Document {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer.tokenize();
+        let mut parser = Parser::new(tokens);
+        let doc = parser.parse().expect("parse failed");
+        let doc = resolver::resolve(doc);
+        id::assign_ids(doc)
+    }
+
+    #[test]
+    fn table_cell_with_nested_blocks_exports_paragraph_text() {
+        let doc = parse("PAGE(TABLE(ROW(CELL(P(Hello from cell)))))");
+        let out = render(&doc);
+        assert!(
+            out.contains("Hello from cell"),
+            "expected nested P in CELL; got {out:?}"
+        );
+        assert!(
+            !out.contains("  · \n"),
+            "empty bullet line means extract_text-only CELL path; got {out:?}"
+        );
     }
 }
