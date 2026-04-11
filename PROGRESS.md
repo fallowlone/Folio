@@ -4,6 +4,23 @@
 
 ---
 
+## Branding and files (plan)
+
+- **Public format name:** **Lura** (replacing the working name Folio in product/spec copy).
+- **Document file extension:** **`.lura`**.
+- Repo/crate `folio` may be renamed later; syntax, CLI, docs, and examples migration is a separate decision after naming in code is settled.
+
+---
+
+## Graphics and compositing (roadmap)
+
+Goal: masks, transparency groups, non-standard fonts, richer graphics stack (PDF-like model discussion).
+
+**Phased plan A–E:** [docs/GRAPHICS_ROADMAP.md](docs/GRAPHICS_ROADMAP.md)  
+(fonts → simple opacity → clip → groups + blend modes → SMask / complex masks; separately — IR growth beyond flat `DrawCommand`-only paths.)
+
+---
+
 ## Current phase: Render Engine v2 (Rust)
 
 **Status:** active development
@@ -64,6 +81,7 @@ Rules:
 
 - [x] AST → JSON
 - [x] AST → plain text
+- [x] AST → plain text: `CELL` with `Content::Children` renders via `render_children` (like HTML), not only `extract_text`
 - [x] AST → HTML
 - [x] Engine v2: StyledTree → LayoutTree → PageTree → PDF (`pdf-writer`)
 - [x] Engine v2: SVG export
@@ -102,7 +120,7 @@ Rules:
 - [x] `rustybuzz` shaping for measurement
 - [x] PDF backend (`pdf-writer`, built-in Type1 + WinAnsi; TrueType/ToUnicode = future)
 - [x] Painter API skeleton
-- [x] WGPU backend scaffold behind `wgpu-preview` (stub)
+- [x] WGPU backend scaffold behind `wgpu-preview` (stub; optional deps include `wgpu` 28 + `glyphon`)
 - [x] Inline layout v1: line builder over runs + mixed-style PDF/SVG
 - [x] Typography v1: `letter-spacing`, `word-spacing`, basic `justify`
 - [x] Pagination rules v2 (base): `keep-with-next`, `keep-together`, row split policy
@@ -125,7 +143,8 @@ Rules:
 
 ## Open questions
 
-_(none tracked)_
+- Rename scope: product/spec only vs also `Cargo.toml`/crate name and GitHub repo.
+- «Lura Graphics 1.0» subset for the first graphics release (see GRAPHICS_ROADMAP).
 
 ---
 
