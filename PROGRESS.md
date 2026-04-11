@@ -1,12 +1,12 @@
 # PROGRESS.md — doc-format project
 
-**Обновлено:** 7 апреля 2026
+**Обновлено:** 11 апреля 2026
 
 ---
 
-## Текущая фаза: Phase 1 — Go basics + format syntax design
+## Текущая фаза: Render Engine v2 (Rust)
 
-**Статус:** не начата
+**Статус:** активная разработка
 
 ---
 
@@ -64,6 +64,9 @@ PAGE(
 
 - [x] AST → JSON
 - [x] AST → plain text
+- [x] AST → HTML
+- [x] Engine v2: StyledTree -> LayoutTree -> PageTree -> PDF (`pdf-writer`)
+- [x] Удалён legacy PDF путь на `printpdf`
 
 ## Lexer — прогресс
 
@@ -77,6 +80,30 @@ PAGE(
 - [x] Базовый Parser: токены → AST
 - [x] Переменные: подстановка #var в атрибутах (два прохода)
 - [x] Тесты
+- [x] AST переведён на arena-модель (`NodeId`, `Content::Children`)
+- [x] `id::assign_ids` переведён на post-order обход по ID
+- [x] API AST очищен: внешние модули используют методы `Document`, а не внутренние поля arena
+- [x] Inline AST v1: `TextRun`, `Emphasis`, `Strong`, `CodeSpan`, `LinkSpan`
+
+---
+
+## Engine v2 — прогресс
+
+- [x] Data-oriented Styled Arena (`id-arena`)
+- [x] Интеграция `taffy` для layout (Grid/Flex)
+- [x] Пагинация `LayoutTree -> PageTree` (A4)
+- [x] `unicode-linebreak` для переносов
+- [x] `fontdb` для системных шрифтов
+- [x] `rustybuzz` shaping для измерения текста
+- [x] PDF backend на `pdf-writer`
+- [x] Каркас Painter API
+- [x] WGPU backend scaffold под feature `wgpu-preview` (stub)
+- [x] Inline layout v1: line builder по run-ам + mixed-style rendering (PDF/SVG)
+- [x] Typography v1: `letter-spacing`, `word-spacing`, базовый `justify`
+- [x] Pagination rules v2 (base): `keep-with-next`, `keep-together`, row split policy switch
+- [x] Global deps foundation: multi-pass convergence guard + `counters`/`introspection` модули
+- [x] Advanced layout foundation: min/max constraints, float mode (left/right), page header/footer
+- [x] Export parity quality gates: capability matrix + integration smoke tests + cache regression test
 
 ---
 
@@ -88,7 +115,7 @@ _(нет)_
 
 ## Решения принятые
 
-- Язык реализации: Go (простота для контрибьюторов, скорость парсинга, один бинарник)
+- Язык реализации: Rust
 - Семантические блоки вместо визуальных координат
 - Diff-friendly: стабильные block ID
 - Два режима ассетов: self-contained (base64) и linked (external + hash)

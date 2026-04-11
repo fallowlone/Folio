@@ -6,7 +6,7 @@ pub mod resolver;
 mod tests;
 
 use std::collections::HashMap;
-use ast::{Block, Content, Document, Value};
+use ast::{Block, Content, Document, InlineNode, NodeId, Value};
 use crate::lexer::token::Token;
 
 pub struct Parser {
@@ -50,7 +50,8 @@ impl Parser {
 
     pub fn parse(&mut self) -> Result<Document, String> {
         let mut vars = HashMap::new();
-        let mut blocks = Vec::new();
+        let mut arena = Vec::new();
+        let mut roots = Vec::new();
 
         while self.current() != &Token::Eof {
             match self.current().clone() {
@@ -59,13 +60,13 @@ impl Parser {
                     vars.extend(style_vars);
                 }
                 Token::Ident(_) => {
-                    blocks.push(self.parse_block()?);
+                    roots.push(self.parse_block(&mut arena)?);
                 }
                 _ => { self.advance()?; }
             }
         }
 
-        Ok(Document { vars, blocks })
+        Ok(Document::from_parts(vars, arena, roots))
     }
 
     // Parse STYLES({ #key: value, ... }) → HashMap
@@ -99,6 +100,8 @@ impl Parser {
     fn parse_value(&mut self) -> Result<Value, String> {
         match self.advance()? {
             Token::String(s) => Ok(Value::Str(s)),
+            // Bare identifier used as string value: {type: ordered}, {align: center}
+            Token::Ident(s) => Ok(Value::Str(s)),
             Token::Number(n) => Ok(Value::Number(n)),
             Token::Unit(n, u) => Ok(Value::Unit(n, u)),
             Token::Hash(s) => {
@@ -136,7 +139,7 @@ impl Parser {
     }
 
     // Parse a block: IDENT({attrs} content) or IDENT(content) or IDENT[id]({attrs} content)
-    fn parse_block(&mut self) -> Result<Block, String> {
+    fn parse_block(&mut self, arena: &mut Vec<Block>) -> Result<NodeId, String> {
         let kind = self.expect_ident()?;
 
         // Check for optional [id]
@@ -157,20 +160,22 @@ impl Parser {
             HashMap::new()
         };
 
-        let content = self.parse_content()?;
+        let content = self.parse_content(arena)?;
 
         self.expect(&Token::RParen)?;
 
-        Ok(Block { kind, id, attrs, content })
+        let node_id = arena.len();
+        arena.push(Block { kind, id, attrs, content });
+        Ok(node_id)
     }
 
     // Parse content: text or nested blocks until RParen
-    fn parse_content(&mut self) -> Result<Content, String> {
+    fn parse_content(&mut self, arena: &mut Vec<Block>) -> Result<Content, String> {
         match self.current().clone() {
             Token::RParen => Ok(Content::Empty),
             Token::Text(s) => {
                 self.advance()?;
-                Ok(Content::Text(s))
+                Ok(Content::Inline(parse_inline_nodes(&s)))
             }
             Token::Ident(_) => {
                 // nested blocks
@@ -182,12 +187,12 @@ impl Parser {
                             self.parse_styles()?;
                         }
                         Token::Ident(_) => {
-                            blocks.push(self.parse_block()?);
+                            blocks.push(self.parse_block(arena)?);
                         }
                         _ => { self.advance()?; }
                     }
                 }
-                Ok(Content::Blocks(blocks))
+                Ok(Content::Children(blocks))
             }
             _ => {
                 self.advance()?;
@@ -195,4 +200,85 @@ impl Parser {
             }
         }
     }
+}
+
+fn parse_inline_nodes(input: &str) -> Vec<InlineNode> {
+    fn advance_char_boundary(s: &str, i: usize) -> usize {
+        i + s[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1)
+    }
+
+    fn parse_segment(s: &str) -> Vec<InlineNode> {
+        let mut out = Vec::new();
+        let mut i = 0usize;
+
+        while i < s.len() {
+            if s[i..].starts_with("**") {
+                if let Some(close_rel) = s[i + 2..].find("**") {
+                    let inner = &s[i + 2..i + 2 + close_rel];
+                    out.push(InlineNode::Strong(parse_segment(inner)));
+                    i += 4 + close_rel;
+                    continue;
+                }
+            }
+
+            if s[i..].starts_with('*') {
+                if let Some(close_rel) = s[i + 1..].find('*') {
+                    let inner = &s[i + 1..i + 1 + close_rel];
+                    out.push(InlineNode::Emphasis(parse_segment(inner)));
+                    i += 2 + close_rel;
+                    continue;
+                }
+            }
+
+            if s[i..].starts_with('`') {
+                if let Some(close_rel) = s[i + 1..].find('`') {
+                    let inner = &s[i + 1..i + 1 + close_rel];
+                    out.push(InlineNode::CodeSpan(inner.to_string()));
+                    i += 2 + close_rel;
+                    continue;
+                }
+            }
+
+            if s[i..].starts_with('[') {
+                if let Some(close_text_rel) = s[i + 1..].find(']') {
+                    let text_end = i + 1 + close_text_rel;
+                    if s[text_end + 1..].starts_with('(') {
+                        if let Some(close_href_rel) = s[text_end + 2..].find(')') {
+                            let text_inner = &s[i + 1..text_end];
+                            let href_inner = &s[text_end + 2..text_end + 2 + close_href_rel];
+                            out.push(InlineNode::LinkSpan {
+                                text: parse_segment(text_inner),
+                                href: href_inner.to_string(),
+                            });
+                            i = text_end + 3 + close_href_rel;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            let mut next = advance_char_boundary(s, i);
+            while next < s.len()
+                && !s[next..].starts_with("**")
+                && !s[next..].starts_with('*')
+                && !s[next..].starts_with('`')
+                && !s[next..].starts_with('[')
+            {
+                next = advance_char_boundary(s, next);
+            }
+
+            let chunk = &s[i..next];
+            if !chunk.is_empty() {
+                out.push(InlineNode::TextRun(chunk.to_string()));
+            }
+            i = next;
+        }
+
+        if out.is_empty() {
+            out.push(InlineNode::TextRun(String::new()));
+        }
+        out
+    }
+
+    parse_segment(input)
 }
