@@ -20,7 +20,7 @@
 ## Format specification — progress
 
 - [x] Core syntax sketched on paper
-- [ ] Full block set in spec: heading, paragraph, table, **figure**, code (parser/engine coverage still partial vs vision)
+- [x] Core block types: heading, paragraph, table, **figure**, code (`H1`–`H6`, `P`, `TABLE`/`ROW`/`CELL`, `FIGURE`/`IMAGE`, `CODE`; PDF: placeholder for empty asset); full spec vs vision still partial in places
 - [x] Layout: grid-based (not coordinate-based)
 - [x] Block ID scheme
 - [x] Certificate scheme (design level)

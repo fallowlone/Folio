@@ -3,7 +3,7 @@
 use crate::engine::arena::{DocumentArena, NodeId};
 use crate::engine::grid_tracks::GridColumnTrack;
 use crate::engine::layout::compute_layout;
-use crate::engine::paginate::paginate;
+use crate::engine::paginate::{paginate, DrawCommand};
 use crate::engine::resolver::build_styled_tree;
 use crate::engine::styles::{BoxContent, BoxKind, StyledBox};
 use crate::lexer::Lexer;
@@ -117,4 +117,24 @@ PAGE(
     );
     let layout = compute_layout(&styled);
     let _ = paginate(&layout, &styled);
+}
+
+/// Empty `IMAGE` / `FIGURE` leaf: engine draws a visible placeholder until raster decode exists.
+#[test]
+fn empty_image_yields_placeholder_rect_in_page_tree() {
+    let fol = r#"PAGE(IMAGE({width: 40}))"#;
+    let doc = load_fol(fol);
+    let styled = build_styled_tree(&doc);
+    let layout = compute_layout(&styled);
+    let pages = paginate(&layout, &styled);
+    let placeholders = pages
+        .pages
+        .iter()
+        .flat_map(|p| &p.commands)
+        .filter(|c| matches!(c, DrawCommand::Rect { fill: Some(_), stroke: Some(_), .. }))
+        .count();
+    assert!(
+        placeholders >= 1,
+        "expected at least one stroked filled rect as image placeholder"
+    );
 }

@@ -161,6 +161,7 @@ fn styled_box_to_taffy_style(styles: &super::styles::ResolvedStyles, kind: &BoxK
             BoxKind::Grid  => taffy::Display::Grid,
             BoxKind::Table => taffy::Display::Block,  // block: stack rows vertically
             BoxKind::Row   => taffy::Display::Flex,   // flex row: cells in a row
+            BoxKind::Figure => taffy::Display::Flex, // column stack: asset + caption
             _ => taffy::Display::Block,
         },
     };
@@ -230,6 +231,7 @@ fn styled_box_to_taffy_style(styles: &super::styles::ResolvedStyles, kind: &BoxK
         flex_direction: match kind {
             BoxKind::Page => FlexDirection::Column, // vertical stack of blocks
             BoxKind::Row  => FlexDirection::Row,    // horizontal stack of cells
+            BoxKind::Figure => FlexDirection::Column,
             _             => FlexDirection::Row,
         },
         // CELL flex-grow from styles (default 1.0 for equal columns)
