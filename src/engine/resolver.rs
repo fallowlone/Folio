@@ -1,8 +1,8 @@
 /// Конвертирует AST парсера в StyledTree (Arena of StyledBoxes).
 ///
-/// Два прохода:
-/// 1. Конвертация узлов в StyledBox с дефолтными стилями + явными attrs
-/// 2. Наследование стилей от родителя к ребёнку (font-size, color, etc.)
+/// Для каждого узла: база `ResolvedStyles::default()`, наследуемые поля с родителя,
+/// затем `apply_kind_defaults` (чтобы H1/CODE и т.д. не затирались родительским шрифтом),
+/// затем явные attrs блока.
 
 use crate::parser::ast::{Block, Content, Document, InlineNode, NodeId as AstNodeId, Value};
 use super::arena::DocumentArena;
@@ -38,13 +38,13 @@ fn convert_block(
     let block = doc.block(ast_node_id);
     let kind = BoxKind::from_str(&block.kind);
 
-    // Начинаем со стилей по умолчанию для этого вида блока
-    let mut styles = ResolvedStyles::for_kind(&kind);
-
-    // Наследуем от родителя (только наследуемые свойства)
+    // Сначала база и наследуемые от родителя свойства (как в CSS: font-*, color, line-height, text-align).
+    // Потом дефолты вида блока (H1 размер/жирность, CODE monospace, …), иначе наследование затирает их.
+    let mut styles = ResolvedStyles::default();
     if let Some(parent) = parent_styles {
         inherit_styles(&mut styles, parent);
     }
+    styles.apply_kind_defaults(&kind);
 
     // Применяем явные attrs блока (переопределяют дефолты и наследование)
     apply_attrs(&mut styles, block);
@@ -77,9 +77,11 @@ fn convert_block(
     arena.alloc(node)
 }
 
-/// Копирует наследуемые CSS-свойства от родителя к ребёнку.
-/// Только то, что реально наследуется в типографике:
-/// font-*, color, line-height, text-align.
+/// Копирует наследуемые CSS-свойства с родителя на уже инициализированный `child`
+/// (обычно `ResolvedStyles::default()`).
+///
+/// Вызывается до `ResolvedStyles::apply_kind_defaults`, чтобы заголовки и CODE
+/// могли переопределить font-size / weight / family.
 fn inherit_styles(child: &mut ResolvedStyles, parent: &ResolvedStyles) {
     child.font_size = parent.font_size;
     child.font_family = parent.font_family.clone();
@@ -283,6 +285,48 @@ fn value_to_color(value: &Value) -> Option<Color> {
     match value {
         Value::Color(s) | Value::Str(s) => Color::from_str(s),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::arena::NodeId;
+    use crate::lexer::Lexer;
+    use crate::parser::{self, id, Parser};
+
+    fn parse_doc(input: &str) -> Document {
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer.tokenize();
+        let mut parser = Parser::new(tokens);
+        let doc = parser.parse().expect("parse");
+        let doc = parser::resolver::resolve(doc);
+        id::assign_ids(doc)
+    }
+
+    fn first_heading<'a>(arena: &'a DocumentArena, id: NodeId) -> Option<&'a StyledBox> {
+        let node = arena.get(id);
+        if matches!(node.kind, BoxKind::Heading(_)) {
+            return Some(node);
+        }
+        if let BoxContent::Children(children) = &node.content {
+            for &cid in children {
+                if let Some(h) = first_heading(arena, cid) {
+                    return Some(h);
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn h1_nested_in_page_keeps_kind_font_not_parent_body() {
+        let doc = parse_doc("PAGE(H1(Title))");
+        let arena = build_styled_tree(&doc);
+        let root = arena.roots[0];
+        let h1 = first_heading(&arena, root).expect("H1");
+        assert!((h1.styles.font_size - 14.0).abs() < f32::EPSILON);
+        assert_eq!(h1.styles.font_weight, FontWeight::Bold);
     }
 }
 
