@@ -3,6 +3,7 @@
 use std::fmt::Write;
 
 use super::layout::MM_TO_PT;
+use crate::parser::ast::Value;
 use taffy::prelude::*;
 use taffy::style::GridTemplateComponent;
 
@@ -50,6 +51,35 @@ pub fn parse_grid_columns_str(input: &str) -> Result<Vec<GridColumnTrack>, GridT
         return Err(GridTrackParseError::new("no tracks"));
     }
     Ok(out)
+}
+
+/// Разбор значения attrs для GRID columns:
+/// - строка треков: `1fr 10mm auto`
+/// - число: количество равных `1fr` колонок
+/// - unit-токен: `2fr`, `10mm`, `120px`, `12pt`
+pub fn parse_grid_columns_value(value: &Value) -> Option<Vec<GridColumnTrack>> {
+    match value {
+        Value::Str(s) => {
+            let t = s.trim();
+            if let Ok(parsed) = parse_grid_columns_str(t) {
+                Some(parsed)
+            } else if let Ok(n) = t.parse::<usize>() {
+                if n >= 1 {
+                    Some(vec![GridColumnTrack::Fr(1.0); n])
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        Value::Number(n) => Some(vec![GridColumnTrack::Fr(1.0); (*n as usize).max(1)]),
+        Value::Unit(n, unit) => {
+            let token = format!("{}{}", n, unit);
+            parse_grid_columns_str(&token).ok()
+        }
+        _ => None,
+    }
 }
 
 fn parse_track_token(token: &str) -> Result<GridColumnTrack, GridTrackParseError> {
@@ -162,6 +192,7 @@ pub fn tracks_to_taffy_components(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::ast::Value;
 
     #[test]
     fn parse_1fr_2fr() {
@@ -180,5 +211,17 @@ mod tests {
     #[test]
     fn rejects_minmax() {
         assert!(parse_grid_columns_str("minmax(0, 1fr)").is_err());
+    }
+
+    #[test]
+    fn parse_value_unit_fr() {
+        let t = parse_grid_columns_value(&Value::Unit(2.0, "fr".to_string())).unwrap();
+        assert_eq!(t, vec![GridColumnTrack::Fr(2.0)]);
+    }
+
+    #[test]
+    fn parse_value_unit_mm() {
+        let t = parse_grid_columns_value(&Value::Unit(10.0, "mm".to_string())).unwrap();
+        assert_eq!(t, vec![GridColumnTrack::LengthPt(10.0 * MM_TO_PT)]);
     }
 }
