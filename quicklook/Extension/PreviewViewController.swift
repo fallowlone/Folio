@@ -34,7 +34,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         
         guard let symRender = dlsym(handle, "folio_render_html"),
               let symFree = dlsym(handle, "folio_free_string") else {
-            let html = "<h1>dlsym Error</h1><p>Functions not found in libfolio.dylib</p>"
+            let html = "<h1>dlsym Error</h1><p>Functions not found in the Lura render library (libfolio.dylib).</p>"
             webView.loadHTMLString(html, baseURL: nil)
             handler(nil)
             return
@@ -56,7 +56,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             }
             
             guard let resultPtr = folio_render_html(contentStr) else {
-                let html = "<h1>Render Error</h1><p>Folio library returned null.</p>"
+                let html = "<h1>Render Error</h1><p>Lura library returned null.</p>"
                 webView.loadHTMLString(html, baseURL: nil)
                 handler(nil)
                 return

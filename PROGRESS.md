@@ -1,6 +1,6 @@
 # PROGRESS.md — Folio (doc format)
 
-**Updated:** 2026-04-11
+**Updated:** 2026-04-12
 
 ---
 
@@ -125,7 +125,7 @@ Rules:
 - [x] Typography v1: `letter-spacing`, `word-spacing`, basic `justify`
 - [x] Pagination rules v2 (base): `keep-with-next`, `keep-together`, row split policy
 - [x] Global deps foundation: multi-pass convergence guard
-- [ ] Heading counters and page introspection (`counters` / `introspection` stubs removed as dead code on this branch; restore for TOC/refs)
+- [x] Heading counters and page introspection (outline `H1`–`H6`, `{{sec}}`, `{{page:id}}`, multi-pass pagination; see [docs/SPEC.md](docs/SPEC.md))
 - [x] Advanced layout foundation: min/max constraints, float (left/right), page header/footer
 - [x] Export parity: capability matrix + integration smoke tests + cache regression test
 
@@ -143,8 +143,8 @@ Rules:
 
 ## Open questions
 
-- Rename scope: product/spec only vs also `Cargo.toml`/crate name and GitHub repo.
-- «Lura Graphics 1.0» subset for the first graphics release (see GRAPHICS_ROADMAP).
+- Rename scope: product/spec only vs also `Cargo.toml`/crate name and GitHub repo (logged in [docs/PRODUCT_DECISIONS.md](docs/PRODUCT_DECISIONS.md)).
+- «Lura Graphics 1.0» subset for the first graphics release (see GRAPHICS_ROADMAP; baseline A+B+clip logged in PRODUCT_DECISIONS).
 
 ---
 
