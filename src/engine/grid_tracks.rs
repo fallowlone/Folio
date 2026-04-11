@@ -2,11 +2,9 @@
 
 use std::fmt::Write;
 
+use super::layout::MM_TO_PT;
 use taffy::prelude::*;
 use taffy::style::GridTemplateComponent;
-
-/// Согласовано с [`super::layout::MM_TO_PT`].
-const MM_TO_PT: f32 = 2.8346;
 
 /// Один track колонки grid (после резолва в абсолютные единицы для движка, кроме fr).
 #[derive(Debug, Clone, Copy, PartialEq)]
