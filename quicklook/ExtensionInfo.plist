@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>FolioPreview</string>
+    <string>LuraPreview</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleIdentifier</key>
-    <string>com.fallowlone.folio-document-app.PreviewExtension</string>
+    <string>com.fallowlone.lura-document-app.PreviewExtension</string>
     <key>CFBundleName</key>
-    <string>FolioPreview</string>
+    <string>LuraPreview</string>
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
     <key>CFBundleShortVersionString</key>
@@ -24,7 +24,7 @@
         <dict>
             <key>QLSupportedContentTypes</key>
             <array>
-                <string>com.fallowlone.folio-document</string>
+                <string>com.fallowlone.lura-document</string>
                 <string>dyn.ah62d4rv4ge80c55d</string>
             </array>
             <key>QLSupportsSearchableItems</key>

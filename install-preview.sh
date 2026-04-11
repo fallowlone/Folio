@@ -9,8 +9,8 @@ fi
 cargo build --release
 
 echo "==> Setting up bundle directories..."
-APP_NAME="FolioQL"
-EXT_NAME="FolioPreview"
+APP_NAME="Lura"
+EXT_NAME="LuraPreview"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
 EXT_DIR="$APP_DIR/Contents/PlugIns/$EXT_NAME.appex"
@@ -27,10 +27,14 @@ echo "==> Copying Info.plist files..."
 cp quicklook/HostInfo.plist "$APP_DIR/Contents/Info.plist"
 cp quicklook/ExtensionInfo.plist "$EXT_DIR/Contents/Info.plist"
 
-echo "==> Compiling Host App (Swift)..."
+echo "==> Compiling Host App (SwiftUI)..."
 swiftc quicklook/HostApp/main.swift \
+    -parse-as-library \
     -o "$APP_DIR/Contents/MacOS/$APP_NAME" \
-    -target arm64-apple-macos12.0
+    -target arm64-apple-macos13.0 \
+    -framework SwiftUI \
+    -framework AppKit \
+    -framework UniformTypeIdentifiers
 
 echo "==> Compiling Quick Look Extension (Swift)..."
 swiftc quicklook/Extension/PreviewViewController.swift \
@@ -90,8 +94,9 @@ qlmanage -r cache
 echo "==> Done!"
 echo "--------------------------------------------------------"
 echo "DIAGNOSTICS: Checking why pluginkit might be failing..."
-pluginkit -v -m -i com.fallowlone.folio-document-app.PreviewExtension || true
+pluginkit -v -m -i com.fallowlone.lura-document-app.PreviewExtension || true
 echo "Retrieving pkd logs (might take a few seconds)..."
-log show --predicate 'process == "pkd"' --last 5m | grep -i -A 2 -B 2 "Folio" || echo "No pkd logs found"
+log show --predicate 'process == "pkd"' --last 5m | grep -i -E -A 2 -B 2 'Lura|Folio' || echo "No pkd logs found"
 echo "--------------------------------------------------------"
-echo "Now you can try running: qlmanage -p examples/hello.fol"
+echo "Launch: open \"$APP_PATH\""
+echo "Quick Look test: qlmanage -p examples/hello.fol"

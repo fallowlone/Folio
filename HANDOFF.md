@@ -21,12 +21,14 @@
 
 ## Suggested next work (priority-agnostic)
 
-1. **Specification** — single `SPEC.md` or similar derived from `PROGRESS` + examples; version the syntax.
+1. **Specification** — extend [docs/SPEC.md](docs/SPEC.md) beyond counters/introspection; keep versioned.
 2. **PDF typography** — embed TrueType + ToUnicode (noted as v3 in `pdf.rs` comments).
 3. **Diff** — `folio diff` on AST or stable IDs (git-friendly story from CLAUDE.md).
 4. **Block coverage** — `FIGURE` (and any missing semantic blocks) end-to-end parser → layout → export.
 5. **WGPU** — replace stub behind `wgpu-preview` when preview UX is defined.
 6. **CI** — `cargo test` + `cargo clippy` on push if not already elsewhere.
+
+Product/rename/graphics decisions: [docs/PRODUCT_DECISIONS.md](docs/PRODUCT_DECISIONS.md).
 
 ## How to verify locally
 

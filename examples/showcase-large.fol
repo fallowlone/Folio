@@ -37,7 +37,7 @@ PAGE(
     ROW(
       CELL(P(Global refs))
       CELL(P({color: #warn} Foundation))
-      CELL(P(Counters and page map: planned, not wired yet))
+      CELL(P(Heading counters and `{{page:id}}` placeholders: see docs/SPEC.md))
     )
     ROW(
       CELL(P(Export parity))
@@ -75,7 +75,8 @@ PAGE(
   QUOTE(P({color: #muted} "Readable source documents plus deterministic rendering is a strong baseline for collaborative technical publishing."))
   CODE({background: #bgSoft}
     P(fn render_document(doc: &Document) -> Vec<u8> {)
-    P(  let styled = build_styled_tree(doc);)
+    P(  let mut styled = build_styled_tree(doc);)
+    P(  // counters, layout, paginate loop for {{page:…}} — see engine::render)
     P(  let layout = compute_layout(&styled);)
     P(  let pages = paginate(&layout, &styled);)
     P(  backend::pdf::render(&pages))
@@ -104,8 +105,8 @@ PAGE(
     ROW(CELL(P(009)) CELL(P(CLI)) CELL(P(Convert, render, print, and printer listing commands.)) CELL(P(Tools)))
     ROW(CELL(P(010)) CELL(P(Tests)) CELL(P(Unit and integration smoke validation.)) CELL(P(QA)))
     ROW(CELL(P(011)) CELL(P(Assets)) CELL(P(Planned linked/hash asset model support.)) CELL(P(Format)))
-    ROW(CELL(P(012)) CELL(P(Counters)) CELL(P(Planned: heading counters when global pass is integrated.)) CELL(P(Engine)))
-    ROW(CELL(P(013)) CELL(P(Introspection)) CELL(P(Planned: page-level map for refs and TOC.)) CELL(P(Engine)))
+    ROW(CELL(P(012)) CELL(P(Counters)) CELL(P(Outline H1–H6 and `{{sec}}` in headings; docs/SPEC.md)) CELL(P(Engine)))
+    ROW(CELL(P(013)) CELL(P(Introspection)) CELL(P(Block id to 1-based page map; `\{{page:id}}` in text)) CELL(P(Engine)))
     ROW(CELL(P(014)) CELL(P(Parity)) CELL(P(Capability matrix and regression checks.)) CELL(P(QA)))
     ROW(CELL(P(015)) CELL(P(Optimization)) CELL(P(Cache hit/miss budgeting and profiling hooks.)) CELL(P(Perf)))
     ROW(CELL(P(016)) CELL(P(Printer)) CELL(P(lp/lpr fallback with dry-run mode.)) CELL(P(Tools)))
