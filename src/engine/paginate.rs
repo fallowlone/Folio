@@ -3,9 +3,10 @@
 /// Последовательный курсор (cursor_y) управляет вертикальным потоком.
 /// Координаты X и ширина берутся из taffy.
 /// Для GRID: cursor_y сохраняется и восстанавливается для каждой ячейки в строке.
-
-use super::layout::{LayoutContent, LayoutNodeIdx, LayoutTree,
-                    A4_HEIGHT_PT, A4_WIDTH_PT, PAGE_MARGIN_PT, MM_TO_PT, CONTENT_WIDTH_PT};
+use super::layout::{
+    LayoutContent, LayoutNodeIdx, LayoutTree, A4_HEIGHT_PT, A4_WIDTH_PT, CONTENT_WIDTH_PT,
+    MM_TO_PT, PAGE_MARGIN_PT,
+};
 use super::styles::{BoxKind, Color, FloatMode, FontStyle, FontWeight, ListStyle};
 use super::text::{break_inline_runs, break_text, text_block_height};
 
@@ -53,7 +54,11 @@ pub struct Page {
 
 impl Page {
     fn new() -> Self {
-        Self { width: A4_WIDTH_PT, height: A4_HEIGHT_PT, commands: Vec::new() }
+        Self {
+            width: A4_WIDTH_PT,
+            height: A4_HEIGHT_PT,
+            commands: Vec::new(),
+        }
     }
 }
 
@@ -64,30 +69,34 @@ pub struct PageTree {
 
 impl PageTree {
     pub fn new() -> Self {
-        Self { pages: vec![Page::new()] }
+        Self {
+            pages: vec![Page::new()],
+        }
     }
 }
 
 impl Default for PageTree {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ─── Константы ────────────────────────────────────────────────────────────────
 
-const CONTENT_TOP:    f32 = PAGE_MARGIN_PT;
+const CONTENT_TOP: f32 = PAGE_MARGIN_PT;
 const CONTENT_BOTTOM: f32 = A4_HEIGHT_PT - PAGE_MARGIN_PT;
 
 // ─── Paginator ────────────────────────────────────────────────────────────────
 
 struct Paginator<'a> {
-    layout:            &'a LayoutTree,
-    styled:            &'a super::arena::DocumentArena,
-    pages:             Vec<Page>,
-    cursor_y:          f32,
+    layout: &'a LayoutTree,
+    styled: &'a super::arena::DocumentArena,
+    pages: Vec<Page>,
+    cursor_y: f32,
     /// Счётчик для текущего нумерованного списка (None = маркированный)
     list_item_counter: Option<usize>,
-    page_header:       Option<String>,
-    page_footer:       Option<String>,
+    page_header: Option<String>,
+    page_footer: Option<String>,
 }
 
 impl<'a> Paginator<'a> {
@@ -146,12 +155,14 @@ impl<'a> Paginator<'a> {
         let node = self.layout.nodes[node_idx].clone();
         let styles = self.styled.get(node.arena_id).styles.clone();
         let bold = styles.font_weight == FontWeight::Bold;
-        let margin_top    = styles.margin.top    * MM_TO_PT;
+        let margin_top = styles.margin.top * MM_TO_PT;
         let margin_bottom = styles.margin.bottom * MM_TO_PT;
-        let padding_left  = styles.padding.left  * MM_TO_PT;
+        let padding_left = styles.padding.left * MM_TO_PT;
         let block_x = match styles.float {
             FloatMode::Left => PAGE_MARGIN_PT,
-            FloatMode::Right => (A4_WIDTH_PT - PAGE_MARGIN_PT - node.width.max(1.0)).max(PAGE_MARGIN_PT),
+            FloatMode::Right => {
+                (A4_WIDTH_PT - PAGE_MARGIN_PT - node.width.max(1.0)).max(PAGE_MARGIN_PT)
+            }
             FloatMode::None => node.x,
         };
 
@@ -171,7 +182,6 @@ impl<'a> Paginator<'a> {
         }
 
         let consumed = match node.content.clone() {
-
             // ─── Текстовый блок ───────────────────────────────────────────
             LayoutContent::Text(text) => {
                 // ListItem: особая обработка с bullet
@@ -197,10 +207,12 @@ impl<'a> Paginator<'a> {
 
                 for (i, line) in lines.iter().enumerate() {
                     let y = self.cursor_y + styles.font_size + i as f32 * line.line_height_pt;
-                    if y > CONTENT_BOTTOM { break; }
+                    if y > CONTENT_BOTTOM {
+                        break;
+                    }
                     self.push_cmd(DrawCommand::Text {
                         content: line.text.clone(),
-                            x: block_x + padding_left,
+                        x: block_x + padding_left,
                         y,
                         font_size: styles.font_size,
                         font_family: styles.font_family.clone(),
@@ -226,7 +238,9 @@ impl<'a> Paginator<'a> {
                 let block_h = if lines.is_empty() {
                     0.0
                 } else {
-                    styles.font_size + (lines.len().saturating_sub(1)) as f32 * (styles.font_size * styles.line_height)
+                    styles.font_size
+                        + (lines.len().saturating_sub(1)) as f32
+                            * (styles.font_size * styles.line_height)
                 };
 
                 if self.cursor_y + block_h > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
@@ -234,7 +248,8 @@ impl<'a> Paginator<'a> {
                 }
 
                 for (line_idx, line) in lines.iter().enumerate() {
-                    let baseline_y = self.cursor_y + styles.font_size + line_idx as f32 * line.line_height_pt;
+                    let baseline_y =
+                        self.cursor_y + styles.font_size + line_idx as f32 * line.line_height_pt;
                     if baseline_y > CONTENT_BOTTOM {
                         break;
                     }
@@ -253,7 +268,11 @@ impl<'a> Paginator<'a> {
                             font_family: frag_font_family,
                             bold: bold || frag.bold,
                             italic: (styles.font_style == FontStyle::Italic) || frag.italic,
-                            color: if frag.link.is_some() { Color::from_hex(0x1D4ED8) } else { styles.color },
+                            color: if frag.link.is_some() {
+                                Color::from_hex(0x1D4ED8)
+                            } else {
+                                styles.color
+                            },
                         });
                         if frag.link.is_some() && !frag.text.trim().is_empty() {
                             let underline_y = baseline_y + 1.0;
@@ -275,31 +294,29 @@ impl<'a> Paginator<'a> {
             }
 
             // ─── Контейнер ────────────────────────────────────────────────
-            LayoutContent::Children(child_indices) => {
-                match node.kind {
-                    BoxKind::Table => self.place_table(node_idx, child_indices),
-                    BoxKind::Grid  => self.place_grid(node_idx, child_indices),
-                    BoxKind::List  => {
-                        let is_ordered = styles.list_style == ListStyle::Ordered;
-                        let mut total = 0.0f32;
-                        for (i, child_idx) in child_indices.into_iter().enumerate() {
-                            self.list_item_counter = if is_ordered { Some(i + 1) } else { None };
-                            let h = self.place_node(child_idx);
-                            total += h;
-                        }
-                        self.list_item_counter = None;
-                        total
+            LayoutContent::Children(child_indices) => match node.kind {
+                BoxKind::Table => self.place_table(node_idx, child_indices),
+                BoxKind::Grid => self.place_grid(node_idx, child_indices),
+                BoxKind::List => {
+                    let is_ordered = styles.list_style == ListStyle::Ordered;
+                    let mut total = 0.0f32;
+                    for (i, child_idx) in child_indices.into_iter().enumerate() {
+                        self.list_item_counter = if is_ordered { Some(i + 1) } else { None };
+                        let h = self.place_node(child_idx);
+                        total += h;
                     }
-                    _ => {
-                        let mut total = 0.0f32;
-                        for child_idx in child_indices {
-                            let h = self.place_node(child_idx);
-                            total += h;
-                        }
-                        total
-                    }
+                    self.list_item_counter = None;
+                    total
                 }
-            }
+                _ => {
+                    let mut total = 0.0f32;
+                    for child_idx in child_indices {
+                        let h = self.place_node(child_idx);
+                        total += h;
+                    }
+                    total
+                }
+            },
 
             LayoutContent::Empty => {
                 if matches!(node.kind, BoxKind::Hr) {
@@ -353,7 +370,7 @@ impl<'a> Paginator<'a> {
         // Bullet "•" или "1." — левее начала текста
         let bullet_text = match self.list_item_counter {
             Some(n) => format!("{}.", n),
-            None    => "\u{2022}".to_string(),
+            None => "\u{2022}".to_string(),
         };
         let bullet_x = node.x - 4.5 * MM_TO_PT;
         let bullet_y = self.cursor_y + styles.font_size;
@@ -370,7 +387,9 @@ impl<'a> Paginator<'a> {
 
         for (i, line) in lines.iter().enumerate() {
             let y = self.cursor_y + styles.font_size + i as f32 * line.line_height_pt;
-            if y > CONTENT_BOTTOM { break; }
+            if y > CONTENT_BOTTOM {
+                break;
+            }
             self.push_cmd(DrawCommand::Text {
                 content: line.text.clone(),
                 x: node.x,
@@ -390,7 +409,7 @@ impl<'a> Paginator<'a> {
     // ─── GRID ─────────────────────────────────────────────────────────────────
 
     fn place_grid(&mut self, grid_idx: LayoutNodeIdx, child_indices: Vec<LayoutNodeIdx>) -> f32 {
-        let grid_node  = self.layout.nodes[grid_idx].clone();
+        let grid_node = self.layout.nodes[grid_idx].clone();
         let grid_styles = self.styled.get(grid_node.arena_id).styles.clone();
         let cols = grid_styles.grid_columns.unwrap_or(1).max(1);
         let grid_start_y = self.cursor_y;
@@ -405,7 +424,9 @@ impl<'a> Paginator<'a> {
                 self.place_node(ci);
                 // Запоминаем максимальную высоту строки
                 let cell_h = self.cursor_y - row_start_y;
-                if cell_h > max_h { max_h = cell_h; }
+                if cell_h > max_h {
+                    max_h = cell_h;
+                }
             }
 
             // Продвигаем курсор на высоту самой высокой ячейки строки
@@ -448,50 +469,62 @@ impl<'a> Paginator<'a> {
             }
 
             // Высота строки = максимум по ячейкам
-            let row_height = cell_indices.iter().map(|&ci| {
-                let cell = &self.layout.nodes[ci];
-                let cell_styles = self.styled.get(cell.arena_id).styles.clone();
-                let bold = cell_styles.font_weight == FontWeight::Bold;
-                match &cell.content {
-                    LayoutContent::Text(t) => {
-                        let w = cell.width.max(1.0);
-                        let lines = break_text(
-                            t,
-                            w,
-                            cell_styles.font_size,
-                            cell_styles.line_height,
-                            bold,
-                            cell_styles.letter_spacing,
-                            cell_styles.word_spacing,
-                        );
-                        text_block_height(&lines)
-                            + cell_styles.padding.top    * MM_TO_PT
-                            + cell_styles.padding.bottom * MM_TO_PT
-                    }
-                    LayoutContent::Inline(runs) => {
-                        let w = cell.width.max(1.0);
-                        let lines = break_inline_runs(
-                            runs,
-                            w,
-                            cell_styles.font_size,
-                            cell_styles.line_height,
-                            cell_styles.letter_spacing,
-                            cell_styles.word_spacing,
-                            cell_styles.justify,
-                        );
-                        if lines.is_empty() {
-                            0.0
-                        } else {
-                            cell_styles.font_size
-                                + (lines.len().saturating_sub(1)) as f32
-                                    * (cell_styles.font_size * cell_styles.line_height)
+            let row_height = cell_indices
+                .iter()
+                .map(|&ci| {
+                    let cell = &self.layout.nodes[ci];
+                    let cell_styles = self.styled.get(cell.arena_id).styles.clone();
+                    let bold = cell_styles.font_weight == FontWeight::Bold;
+                    match &cell.content {
+                        LayoutContent::Text(t) => {
+                            let w = cell.width.max(1.0);
+                            let lines = break_text(
+                                t,
+                                w,
+                                cell_styles.font_size,
+                                cell_styles.line_height,
+                                bold,
+                                cell_styles.letter_spacing,
+                                cell_styles.word_spacing,
+                            );
+                            text_block_height(&lines)
                                 + cell_styles.padding.top * MM_TO_PT
                                 + cell_styles.padding.bottom * MM_TO_PT
                         }
+                        LayoutContent::Inline(runs) => {
+                            let w = cell.width.max(1.0);
+                            let lines = break_inline_runs(
+                                runs,
+                                w,
+                                cell_styles.font_size,
+                                cell_styles.line_height,
+                                cell_styles.letter_spacing,
+                                cell_styles.word_spacing,
+                                cell_styles.justify,
+                            );
+                            if lines.is_empty() {
+                                0.0
+                            } else {
+                                cell_styles.font_size
+                                    + (lines.len().saturating_sub(1)) as f32
+                                        * (cell_styles.font_size * cell_styles.line_height)
+                                    + cell_styles.padding.top * MM_TO_PT
+                                    + cell_styles.padding.bottom * MM_TO_PT
+                            }
+                        }
+                        LayoutContent::Children(children) => {
+                            children
+                                .iter()
+                                .map(|&child_idx| self.estimate_height(child_idx))
+                                .sum::<f32>()
+                                + cell_styles.padding.top * MM_TO_PT
+                                + cell_styles.padding.bottom * MM_TO_PT
+                        }
+                        LayoutContent::Empty => 0.0,
                     }
-                    _ => 0.0,
-                }
-            }).fold(0.0f32, f32::max).max(12.0);
+                })
+                .fold(0.0f32, f32::max)
+                .max(12.0);
 
             if !row_styles.allow_row_split
                 && self.cursor_y + row_height > CONTENT_BOTTOM
@@ -501,8 +534,13 @@ impl<'a> Paginator<'a> {
             }
 
             // Фон строки: явный background-color строки ИЛИ фон header по умолчанию
-            let row_bg = row_styles.background
-                .or_else(|| if row_num == 0 { Some(Color::from_hex(0xF5F5F5)) } else { None });
+            let row_bg = row_styles.background.or_else(|| {
+                if row_num == 0 {
+                    Some(Color::from_hex(0xF5F5F5))
+                } else {
+                    None
+                }
+            });
 
             if let Some(bg) = row_bg {
                 self.push_cmd(DrawCommand::Rect {
@@ -521,7 +559,7 @@ impl<'a> Paginator<'a> {
                 let cell = self.layout.nodes[cell_idx].clone();
                 let cell_styles = self.styled.get(cell.arena_id).styles.clone();
                 let bold = cell_styles.font_weight == FontWeight::Bold;
-                let padding_top  = cell_styles.padding.top  * MM_TO_PT;
+                let padding_top = cell_styles.padding.top * MM_TO_PT;
                 let padding_left = cell_styles.padding.left * MM_TO_PT;
 
                 // Фон отдельной ячейки
@@ -550,9 +588,13 @@ impl<'a> Paginator<'a> {
                             cell_styles.word_spacing,
                         );
                         for (i, line) in lines.iter().enumerate() {
-                            let y = row_start_y + padding_top + cell_styles.font_size
+                            let y = row_start_y
+                                + padding_top
+                                + cell_styles.font_size
                                 + i as f32 * line.line_height_pt;
-                            if y > CONTENT_BOTTOM { break; }
+                            if y > CONTENT_BOTTOM {
+                                break;
+                            }
                             self.push_cmd(DrawCommand::Text {
                                 content: line.text.clone(),
                                 x: cell.x + padding_left,
@@ -577,9 +619,13 @@ impl<'a> Paginator<'a> {
                             cell_styles.justify,
                         );
                         for (i, line) in lines.iter().enumerate() {
-                            let baseline_y = row_start_y + padding_top + cell_styles.font_size
+                            let baseline_y = row_start_y
+                                + padding_top
+                                + cell_styles.font_size
                                 + i as f32 * line.line_height_pt;
-                            if baseline_y > CONTENT_BOTTOM { break; }
+                            if baseline_y > CONTENT_BOTTOM {
+                                break;
+                            }
                             let mut x_cursor = cell.x + padding_left;
                             for frag in &line.fragments {
                                 let font_family = if frag.code {
@@ -594,14 +640,27 @@ impl<'a> Paginator<'a> {
                                     font_size: cell_styles.font_size,
                                     font_family,
                                     bold: bold || frag.bold,
-                                    italic: (cell_styles.font_style == FontStyle::Italic) || frag.italic,
-                                    color: if frag.link.is_some() { Color::from_hex(0x1D4ED8) } else { cell_styles.color },
+                                    italic: (cell_styles.font_style == FontStyle::Italic)
+                                        || frag.italic,
+                                    color: if frag.link.is_some() {
+                                        Color::from_hex(0x1D4ED8)
+                                    } else {
+                                        cell_styles.color
+                                    },
                                 });
                                 x_cursor += frag.width;
                             }
                         }
                     }
-                    _ => {}
+                    LayoutContent::Children(children) => {
+                        let cursor_before_cell = self.cursor_y;
+                        self.cursor_y = row_start_y + padding_top;
+                        for &child_idx in children {
+                            self.place_node(child_idx);
+                        }
+                        self.cursor_y = cursor_before_cell;
+                    }
+                    LayoutContent::Empty => {}
                 }
             }
 
@@ -685,12 +744,16 @@ impl<'a> Paginator<'a> {
 pub fn paginate(layout: &LayoutTree, styled: &super::arena::DocumentArena) -> PageTree {
     let mut pager = Paginator::new(layout, styled);
 
-    for &root_idx in &layout.roots {
+    for (root_num, &root_idx) in layout.roots.iter().enumerate() {
         let node = &layout.nodes[root_idx];
         let root_styles = styled.get(node.arena_id).styles.clone();
         pager.page_header = root_styles.page_header.clone();
         pager.page_footer = root_styles.page_footer.clone();
-        pager.draw_page_chrome();
+        if root_num == 0 {
+            pager.draw_page_chrome();
+        } else {
+            pager.new_page();
+        }
         match &node.content {
             LayoutContent::Children(children) => {
                 let children = children.clone();
@@ -713,7 +776,9 @@ pub fn paginate(layout: &LayoutTree, styled: &super::arena::DocumentArena) -> Pa
                     pager.place_node(*child_idx);
                 }
             }
-            _ => { pager.place_node(root_idx); }
+            _ => {
+                pager.place_node(root_idx);
+            }
         }
     }
 
