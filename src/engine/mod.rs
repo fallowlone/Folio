@@ -47,10 +47,8 @@ pub fn render(doc: &Document, options: ExportOptions) -> Vec<u8> {
     }
 
     let styled = resolver::build_styled_tree(doc);
-    let _heading_counters = counters::collect_heading_counters(&styled);
     let layout = layout::compute_layout(&styled);
     let pages  = paginate::paginate(&layout, &styled);
-    let _introspection = introspection::build_page_introspection(&layout, &pages);
 
     let bytes = match options.format {
         ExportFormat::Pdf => backend::pdf::render(&pages),

@@ -784,7 +784,6 @@ pub fn paginate(layout: &LayoutTree, styled: &super::arena::DocumentArena) -> Pa
 
     PageTree { pages: pager.pages }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
