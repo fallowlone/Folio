@@ -169,16 +169,21 @@ impl<'a> Paginator<'a> {
         self.cursor_y += margin_top;
 
         if let Some(bg) = styles.background {
-            let estimated_h = self.estimate_height(node_idx);
-            self.push_cmd(DrawCommand::Rect {
-                x: block_x,
-                y: self.cursor_y,
-                w: node.width.max(1.0),
-                h: estimated_h,
-                fill: Some(bg),
-                stroke: None,
-                stroke_width: 0.0,
-            });
+            if !matches!(
+                &node.content,
+                LayoutContent::Text(_) | LayoutContent::Inline(_)
+            ) {
+                let estimated_h = self.estimate_height(node_idx);
+                self.push_cmd(DrawCommand::Rect {
+                    x: block_x,
+                    y: self.cursor_y,
+                    w: node.width.max(1.0),
+                    h: estimated_h,
+                    fill: Some(bg),
+                    stroke: None,
+                    stroke_width: 0.0,
+                });
+            }
         }
 
         let consumed = match node.content.clone() {
@@ -189,7 +194,7 @@ impl<'a> Paginator<'a> {
                     return self.place_list_item(node_idx, &text, margin_top, margin_bottom);
                 }
 
-                let width = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let width = node.width.max(1.0);
                 let lines = break_text(
                     &text,
                     width,
@@ -203,6 +208,18 @@ impl<'a> Paginator<'a> {
 
                 if self.cursor_y + block_h > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
                     self.new_page();
+                }
+
+                if let Some(bg) = styles.background {
+                    self.push_cmd(DrawCommand::Rect {
+                        x: block_x,
+                        y: self.cursor_y,
+                        w: node.width.max(1.0),
+                        h: block_h,
+                        fill: Some(bg),
+                        stroke: None,
+                        stroke_width: 0.0,
+                    });
                 }
 
                 for (i, line) in lines.iter().enumerate() {
@@ -225,7 +242,7 @@ impl<'a> Paginator<'a> {
                 block_h
             }
             LayoutContent::Inline(runs) => {
-                let width = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let width = node.width.max(1.0);
                 let lines = break_inline_runs(
                     &runs,
                     width,
@@ -245,6 +262,18 @@ impl<'a> Paginator<'a> {
 
                 if self.cursor_y + block_h > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
                     self.new_page();
+                }
+
+                if let Some(bg) = styles.background {
+                    self.push_cmd(DrawCommand::Rect {
+                        x: block_x,
+                        y: self.cursor_y,
+                        w: node.width.max(1.0),
+                        h: block_h,
+                        fill: Some(bg),
+                        stroke: None,
+                        stroke_width: 0.0,
+                    });
                 }
 
                 for (line_idx, line) in lines.iter().enumerate() {
@@ -700,7 +729,7 @@ impl<'a> Paginator<'a> {
         let bold = styles.font_weight == FontWeight::Bold;
         match &node.content {
             LayoutContent::Text(t) => {
-                let w = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let w = node.width.max(1.0);
                 let lines = break_text(
                     t,
                     w,
@@ -713,7 +742,7 @@ impl<'a> Paginator<'a> {
                 text_block_height(&lines)
             }
             LayoutContent::Inline(runs) => {
-                let w = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let w = node.width.max(1.0);
                 let lines = break_inline_runs(
                     runs,
                     w,
@@ -789,6 +818,7 @@ pub fn paginate(layout: &LayoutTree, styled: &super::arena::DocumentArena) -> Pa
 mod tests {
     use super::*;
     use crate::engine::arena::DocumentArena;
+    use crate::engine::layout::LayoutBox;
     use crate::engine::styles::{BoxContent, ResolvedStyles, StyledBox};
 
     fn approx_eq(a: f32, b: f32) -> bool {
@@ -865,7 +895,10 @@ mod tests {
             })
             .expect("expected background rect for cell");
 
-        assert!(approx_eq(bg_rect.0, cell_x), "background x must match cell x");
+        assert!(
+            approx_eq(bg_rect.0, cell_x),
+            "background x must match cell x"
+        );
         assert!(
             approx_eq(bg_rect.1, cell_w),
             "background width must match cell width"
