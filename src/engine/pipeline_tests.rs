@@ -58,6 +58,37 @@ fn five_page_blocks_yield_five_physical_pages() {
     );
 }
 
+/// Narrow fixed column + long `P`: taffy leaf measure must wrap text so `LayoutBox` height > one line.
+#[test]
+fn grid_narrow_column_multiline_paragraph_measured_height() {
+    let fol = r#"
+PAGE(
+  GRID({columns: "40pt 1fr"}
+    P(Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda Mu)
+    P(X)
+  )
+)
+"#;
+    let doc = load_fol(fol);
+    let styled = build_styled_tree(&doc);
+    let layout = compute_layout(&styled);
+
+    let narrow_heights: Vec<f32> = layout
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, BoxKind::Paragraph) && n.width < 55.0)
+        .map(|n| n.height)
+        .collect();
+
+    assert!(
+        narrow_heights.iter().any(|&h| h > 18.0),
+        "expected wrapped paragraph height > one line (~13pt), got {:?}",
+        narrow_heights
+    );
+
+    let _ = paginate(&layout, &styled);
+}
+
 /// GRID with `columns: "1fr 2fr"` yields cell widths in roughly a 1:2 ratio (taffy + extract_layout).
 #[test]
 fn grid_1fr_2fr_column_width_ratio() {

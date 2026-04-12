@@ -358,6 +358,95 @@ pub fn text_block_height(lines: &[TextLine]) -> f32 {
     first.font_size + (lines.len().saturating_sub(1)) as f32 * first.line_height_pt
 }
 
+/// Maximum width of a single whitespace-delimited token (for min-content probes).
+pub fn max_word_width_pt(
+    text: &str,
+    font_size_pt: f32,
+    bold: bool,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+) -> f32 {
+    text.split_whitespace()
+        .map(|w| {
+            text_width_pt_with_spacing(w, font_size_pt, bold, letter_spacing_pt, word_spacing_pt)
+        })
+        .fold(0.0f32, f32::max)
+        .max(1.0)
+}
+
+/// Block height from already-wrapped inline lines (matches paginator math).
+pub fn inline_lines_block_height(lines: &[InlineLine], font_size_pt: f32, line_height: f32) -> f32 {
+    if lines.is_empty() {
+        0.0
+    } else {
+        font_size_pt + (lines.len().saturating_sub(1)) as f32 * (font_size_pt * line_height)
+    }
+}
+
+/// Block height for inline runs after wrapping to `max_width_pt` (matches paginator math).
+pub fn inline_runs_block_height(
+    runs: &[InlineRun],
+    max_width_pt: f32,
+    font_size_pt: f32,
+    line_height: f32,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+    justify: bool,
+) -> f32 {
+    let lines = break_inline_runs(
+        runs,
+        max_width_pt,
+        font_size_pt,
+        line_height,
+        letter_spacing_pt,
+        word_spacing_pt,
+        justify,
+    );
+    inline_lines_block_height(&lines, font_size_pt, line_height)
+}
+
+/// Widest line when wrapping is effectively disabled (max-content width probe).
+pub fn inline_runs_intrinsic_max_line_width_pt(
+    runs: &[InlineRun],
+    font_size_pt: f32,
+    line_height: f32,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+) -> f32 {
+    const HUGE: f32 = 1_000_000.0;
+    let lines = break_inline_runs(
+        runs,
+        HUGE,
+        font_size_pt,
+        line_height,
+        letter_spacing_pt,
+        word_spacing_pt,
+        false,
+    );
+    lines.iter().map(|l| l.width).fold(0.0f32, f32::max).max(1.0)
+}
+
+/// Max word width across runs (min-content width heuristic for inline).
+pub fn max_word_width_across_runs(
+    runs: &[InlineRun],
+    font_size_pt: f32,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+) -> f32 {
+    runs.iter()
+        .map(|r| {
+            max_word_width_pt(
+                &r.text,
+                font_size_pt,
+                r.bold,
+                letter_spacing_pt,
+                word_spacing_pt,
+            )
+        })
+        .fold(0.0f32, f32::max)
+        .max(1.0)
+}
+
 #[derive(Debug, Clone)]
 pub struct InlineFragment {
     pub text: String,

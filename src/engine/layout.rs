@@ -8,7 +8,11 @@
 use taffy::prelude::*;
 use super::arena::{DocumentArena, NodeId as ArenaNodeId};
 use super::grid_tracks::tracks_to_taffy_components;
-use super::styles::{BoxContent, BoxKind, Display, InlineRun};
+use super::styles::{BoxContent, BoxKind, Display, FontWeight, InlineRun, ResolvedStyles, TextAlign};
+use super::text::{
+    break_inline_runs, break_text, inline_lines_block_height, inline_runs_block_height,
+    inline_runs_intrinsic_max_line_width_pt, max_word_width_across_runs, max_word_width_pt, text_block_height,
+};
 
 // --- Constants ---
 
@@ -24,6 +28,13 @@ pub const PAGE_MARGIN_PT: f32 = PAGE_MARGIN_MM * MM_TO_PT;
 
 /// A4 content area width in pt
 pub const CONTENT_WIDTH_PT: f32 = (A4_WIDTH_MM - PAGE_MARGIN_MM * 2.0) * MM_TO_PT; // ≈ 481.0
+
+/// Inner width for line breaking and text paint: border-box minus horizontal padding (pt).
+pub fn text_container_width_pt(border_box_width_pt: f32, padding_left_mm: f32, padding_right_mm: f32) -> f32 {
+    let pl = padding_left_mm * MM_TO_PT;
+    let pr = padding_right_mm * MM_TO_PT;
+    (border_box_width_pt - pl - pr).max(1.0)
+}
 
 // --- Result structures ---
 
@@ -95,7 +106,9 @@ pub fn compute_layout(styled: &DocumentArena) -> LayoutTree {
             width:  AvailableSpace::Definite(CONTENT_WIDTH_PT),
             height: AvailableSpace::MaxContent,
         };
-        let _ = taffy.compute_layout(*taffy_root, available);
+        let _ = taffy.compute_layout_with_measure(*taffy_root, available, |known, avail, _nid, ctx, _style| {
+            measure_leaf(styled, known, avail, ctx)
+        });
     }
 
     // Flatten results into LayoutTree
@@ -133,9 +146,7 @@ fn build_taffy_node(
 
     match &node.content {
         BoxContent::Text(_) | BoxContent::Inline(_) | BoxContent::Empty => {
-            // Leaf text node.
-            // Height would come from a measure function in compute_layout_with_measure;
-            // v2 keeps a fixed height per line for simplicity.
+            // Leaf: intrinsic size from `measure_leaf` during `compute_layout_with_measure`.
             taffy.new_leaf_with_context(style, arena_id).unwrap()
         }
         BoxContent::Children(children) => {
@@ -302,4 +313,240 @@ fn extract_layout(
     let idx = layout_tree.nodes.len();
     layout_tree.nodes.push(layout_box);
     idx
+}
+
+// --- Leaf measure (taffy content box) ---
+
+const MEASURE_HUGE_WIDTH_PT: f32 = 1_000_000.0;
+
+fn measure_leaf(
+    styled: &DocumentArena,
+    known_dimensions: Size<Option<f32>>,
+    available_space: Size<AvailableSpace>,
+    context: Option<&mut ArenaNodeId>,
+) -> Size<f32> {
+    if let (Some(w), Some(h)) = (known_dimensions.width, known_dimensions.height) {
+        return Size { width: w, height: h };
+    }
+
+    let Some(arena_id) = context.copied() else {
+        return Size::ZERO;
+    };
+
+    let node = styled.get(arena_id);
+    match &node.content {
+        BoxContent::Empty => Size::ZERO,
+        BoxContent::Text(text) => measure_text_leaf(text, &node.styles, known_dimensions, available_space),
+        BoxContent::Inline(runs) => measure_inline_leaf(runs, &node.styles, known_dimensions, available_space),
+        BoxContent::Children(_) => Size::ZERO,
+    }
+}
+
+fn measure_text_leaf(
+    text: &str,
+    styles: &ResolvedStyles,
+    known_dimensions: Size<Option<f32>>,
+    available_space: Size<AvailableSpace>,
+) -> Size<f32> {
+    let bold = styles.font_weight == FontWeight::Bold;
+
+    if let Some(w) = known_dimensions.width {
+        let lines = break_text(
+            text,
+            w,
+            styles.font_size,
+            styles.line_height,
+            bold,
+            styles.letter_spacing,
+            styles.word_spacing,
+        );
+        let h = text_block_height(&lines);
+        return Size { width: w, height: h };
+    }
+
+    if let Some(h) = known_dimensions.height {
+        let w = intrinsic_text_width_for_unknown_width(text, styles, bold, available_space.width);
+        return Size { width: w, height: h };
+    }
+
+    match available_space.width {
+        AvailableSpace::MaxContent => {
+            let lines = break_text(
+                text,
+                MEASURE_HUGE_WIDTH_PT,
+                styles.font_size,
+                styles.line_height,
+                bold,
+                styles.letter_spacing,
+                styles.word_spacing,
+            );
+            let w = lines
+                .iter()
+                .map(|l| l.width)
+                .fold(0.0f32, f32::max)
+                .max(1.0);
+            let h = text_block_height(&lines);
+            Size { width: w, height: h }
+        }
+        AvailableSpace::MinContent => {
+            let mw = max_word_width_pt(
+                text,
+                styles.font_size,
+                bold,
+                styles.letter_spacing,
+                styles.word_spacing,
+            );
+            let lines = break_text(
+                text,
+                mw,
+                styles.font_size,
+                styles.line_height,
+                bold,
+                styles.letter_spacing,
+                styles.word_spacing,
+            );
+            let h = text_block_height(&lines);
+            Size { width: mw, height: h }
+        }
+        AvailableSpace::Definite(w) => {
+            let w = w.max(1.0);
+            let lines = break_text(
+                text,
+                w,
+                styles.font_size,
+                styles.line_height,
+                bold,
+                styles.letter_spacing,
+                styles.word_spacing,
+            );
+            let h = text_block_height(&lines);
+            Size { width: w, height: h }
+        }
+    }
+}
+
+fn intrinsic_text_width_for_unknown_width(
+    text: &str,
+    styles: &ResolvedStyles,
+    bold: bool,
+    width_space: AvailableSpace,
+) -> f32 {
+    match width_space {
+        AvailableSpace::Definite(w) => w.max(1.0),
+        AvailableSpace::MaxContent => {
+            let lines = break_text(
+                text,
+                MEASURE_HUGE_WIDTH_PT,
+                styles.font_size,
+                styles.line_height,
+                bold,
+                styles.letter_spacing,
+                styles.word_spacing,
+            );
+            lines
+                .iter()
+                .map(|l| l.width)
+                .fold(0.0f32, f32::max)
+                .max(1.0)
+        }
+        AvailableSpace::MinContent => max_word_width_pt(
+            text,
+            styles.font_size,
+            bold,
+            styles.letter_spacing,
+            styles.word_spacing,
+        ),
+    }
+}
+
+fn measure_inline_leaf(
+    runs: &[InlineRun],
+    styles: &ResolvedStyles,
+    known_dimensions: Size<Option<f32>>,
+    available_space: Size<AvailableSpace>,
+) -> Size<f32> {
+    let justify = styles.justify || styles.text_align == TextAlign::Justify;
+
+    if let Some(w) = known_dimensions.width {
+        let h = inline_runs_block_height(
+            runs,
+            w,
+            styles.font_size,
+            styles.line_height,
+            styles.letter_spacing,
+            styles.word_spacing,
+            justify,
+        );
+        return Size { width: w, height: h };
+    }
+
+    if let Some(h) = known_dimensions.height {
+        let w = match available_space.width {
+            AvailableSpace::Definite(w) => w.max(1.0),
+            AvailableSpace::MaxContent => {
+                inline_runs_intrinsic_max_line_width_pt(
+                    runs,
+                    styles.font_size,
+                    styles.line_height,
+                    styles.letter_spacing,
+                    styles.word_spacing,
+                )
+            }
+            AvailableSpace::MinContent => max_word_width_across_runs(
+                runs,
+                styles.font_size,
+                styles.letter_spacing,
+                styles.word_spacing,
+            ),
+        };
+        return Size { width: w, height: h };
+    }
+
+    match available_space.width {
+        AvailableSpace::MaxContent => {
+            let lines = break_inline_runs(
+                runs,
+                MEASURE_HUGE_WIDTH_PT,
+                styles.font_size,
+                styles.line_height,
+                styles.letter_spacing,
+                styles.word_spacing,
+                false,
+            );
+            let w = lines.iter().map(|l| l.width).fold(0.0f32, f32::max).max(1.0);
+            let h = inline_lines_block_height(&lines, styles.font_size, styles.line_height);
+            Size { width: w, height: h }
+        }
+        AvailableSpace::MinContent => {
+            let mw = max_word_width_across_runs(
+                runs,
+                styles.font_size,
+                styles.letter_spacing,
+                styles.word_spacing,
+            );
+            let h = inline_runs_block_height(
+                runs,
+                mw,
+                styles.font_size,
+                styles.line_height,
+                styles.letter_spacing,
+                styles.word_spacing,
+                justify,
+            );
+            Size { width: mw, height: h }
+        }
+        AvailableSpace::Definite(w) => {
+            let w = w.max(1.0);
+            let h = inline_runs_block_height(
+                runs,
+                w,
+                styles.font_size,
+                styles.line_height,
+                styles.letter_spacing,
+                styles.word_spacing,
+                justify,
+            );
+            Size { width: w, height: h }
+        }
+    }
 }
