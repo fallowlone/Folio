@@ -6,11 +6,13 @@
 use std::collections::HashMap;
 
 use super::layout::{
-    LayoutContent, LayoutNodeIdx, LayoutTree, A4_HEIGHT_PT, A4_WIDTH_PT, CONTENT_WIDTH_PT,
-    MM_TO_PT, PAGE_MARGIN_PT,
+    text_container_width_pt, LayoutContent, LayoutNodeIdx, LayoutTree, A4_HEIGHT_PT, A4_WIDTH_PT,
+    CONTENT_WIDTH_PT, MM_TO_PT, PAGE_MARGIN_PT,
 };
 use super::styles::{BoxKind, Color, FloatMode, FontStyle, FontWeight, ListStyle};
-use super::text::{break_inline_runs, break_text, text_block_height};
+use super::text::{
+    break_inline_runs, break_text, inline_lines_block_height, inline_runs_block_height, text_block_height,
+};
 
 // --- Draw commands ---
 
@@ -247,7 +249,7 @@ impl<'a> Paginator<'a> {
                     return self.place_list_item(node_idx, &text, margin_top, margin_bottom);
                 }
 
-                let width = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let width = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
                 let lines = break_text(
                     &text,
                     width,
@@ -283,7 +285,8 @@ impl<'a> Paginator<'a> {
                 block_h
             }
             LayoutContent::Inline(runs) => {
-                let width = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let width = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
+                let justify = styles.justify || styles.text_align == super::styles::TextAlign::Justify;
                 let lines = break_inline_runs(
                     &runs,
                     width,
@@ -291,15 +294,9 @@ impl<'a> Paginator<'a> {
                     styles.line_height,
                     styles.letter_spacing,
                     styles.word_spacing,
-                    styles.justify || styles.text_align == super::styles::TextAlign::Justify,
+                    justify,
                 );
-                let block_h = if lines.is_empty() {
-                    0.0
-                } else {
-                    styles.font_size
-                        + (lines.len().saturating_sub(1)) as f32
-                            * (styles.font_size * styles.line_height)
-                };
+                let block_h = inline_lines_block_height(&lines, styles.font_size, styles.line_height);
 
                 if self.cursor_y + block_h > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
                     self.new_page();
@@ -416,9 +413,10 @@ impl<'a> Paginator<'a> {
         let styles = self.styled.get(node.arena_id).styles.clone();
         let bold = styles.font_weight == FontWeight::Bold;
 
+        let width = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
         let lines = break_text(
             text,
-            node.width.max(1.0),
+            width,
             styles.font_size,
             styles.line_height,
             bold,
@@ -541,7 +539,11 @@ impl<'a> Paginator<'a> {
                     let bold = cell_styles.font_weight == FontWeight::Bold;
                     match &cell.content {
                         LayoutContent::Text(t) => {
-                            let w = cell.width.max(1.0);
+                            let w = text_container_width_pt(
+                                cell.width,
+                                cell_styles.padding.left,
+                                cell_styles.padding.right,
+                            );
                             let lines = break_text(
                                 t,
                                 w,
@@ -556,8 +558,12 @@ impl<'a> Paginator<'a> {
                                 + cell_styles.padding.bottom * MM_TO_PT
                         }
                         LayoutContent::Inline(runs) => {
-                            let w = cell.width.max(1.0);
-                            let lines = break_inline_runs(
+                            let w = text_container_width_pt(
+                                cell.width,
+                                cell_styles.padding.left,
+                                cell_styles.padding.right,
+                            );
+                            inline_runs_block_height(
                                 runs,
                                 w,
                                 cell_styles.font_size,
@@ -565,16 +571,8 @@ impl<'a> Paginator<'a> {
                                 cell_styles.letter_spacing,
                                 cell_styles.word_spacing,
                                 cell_styles.justify,
-                            );
-                            if lines.is_empty() {
-                                0.0
-                            } else {
-                                cell_styles.font_size
-                                    + (lines.len().saturating_sub(1)) as f32
-                                        * (cell_styles.font_size * cell_styles.line_height)
-                                    + cell_styles.padding.top * MM_TO_PT
-                                    + cell_styles.padding.bottom * MM_TO_PT
-                            }
+                            ) + cell_styles.padding.top * MM_TO_PT
+                                + cell_styles.padding.bottom * MM_TO_PT
                         }
                         LayoutContent::Children(children) => {
                             children
@@ -641,7 +639,11 @@ impl<'a> Paginator<'a> {
 
                 match &cell.content {
                     LayoutContent::Text(text) => {
-                        let w = cell.width.max(1.0);
+                        let w = text_container_width_pt(
+                            cell.width,
+                            cell_styles.padding.left,
+                            cell_styles.padding.right,
+                        );
                         let lines = break_text(
                             text,
                             w,
@@ -672,7 +674,11 @@ impl<'a> Paginator<'a> {
                         }
                     }
                     LayoutContent::Inline(runs) => {
-                        let w = cell.width.max(1.0);
+                        let w = text_container_width_pt(
+                            cell.width,
+                            cell_styles.padding.left,
+                            cell_styles.padding.right,
+                        );
                         let lines = break_inline_runs(
                             runs,
                             w,
@@ -767,7 +773,7 @@ impl<'a> Paginator<'a> {
         let bold = styles.font_weight == FontWeight::Bold;
         match &node.content {
             LayoutContent::Text(t) => {
-                let w = node.width.max(CONTENT_WIDTH_PT * 0.3);
+                let w = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
                 let lines = break_text(
                     t,
                     w,
@@ -780,8 +786,8 @@ impl<'a> Paginator<'a> {
                 text_block_height(&lines)
             }
             LayoutContent::Inline(runs) => {
-                let w = node.width.max(CONTENT_WIDTH_PT * 0.3);
-                let lines = break_inline_runs(
+                let w = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
+                inline_runs_block_height(
                     runs,
                     w,
                     styles.font_size,
@@ -789,14 +795,7 @@ impl<'a> Paginator<'a> {
                     styles.letter_spacing,
                     styles.word_spacing,
                     styles.justify,
-                );
-                if lines.is_empty() {
-                    0.0
-                } else {
-                    styles.font_size
-                        + (lines.len().saturating_sub(1)) as f32
-                            * (styles.font_size * styles.line_height)
-                }
+                )
             }
             LayoutContent::Children(children) => {
                 children.iter().map(|&ci| self.estimate_height(ci)).sum()

@@ -60,6 +60,8 @@ After `BLOCK(`, if the first non-space character is `{`, the parser treats it as
 4. Loop: layout → paginate → build block→page map; if `{{page:…}}` present and map changed, substitute and repeat.  
 5. Paint PDF / SVG.
 
+**Layout measure:** Text and inline leaves are sized during the taffy pass via `compute_layout_with_measure`, using the same line-breaking helpers as pagination (`break_text` / `break_inline_runs`) and the content width implied by the parent (definite column width minus horizontal padding). Pagination then breaks again at the same inner width so grid/flex row heights and paint agree.
+
 ---
 
 ## Related documents
