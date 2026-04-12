@@ -195,8 +195,9 @@ fn clip_rect_to_scissor(
     let sy = y_top.floor().clamp(0.0, ch) as u32;
     let sw = w.ceil().clamp(1.0, cw) as u32;
     let sh = h.ceil().clamp(1.0, ch) as u32;
-    let sw = sw.min(canvas_w.saturating_sub(sx)).max(1);
-    let sh = sh.min(canvas_h.saturating_sub(sy)).max(1);
+    // Empty extent (sw/sh = 0) when the rect is past the edge; batches skip these scissors.
+    let sw = sw.min(canvas_w.saturating_sub(sx));
+    let sh = sh.min(canvas_h.saturating_sub(sy));
     (sx, sy, sw, sh)
 }
 
@@ -813,4 +814,29 @@ async fn render_to_png_async(doc: &PaintDocument) -> Result<Vec<u8>, ()> {
 
     let rgba = read_rgba_texture(&device, &queue, &texture, width, height);
     Ok(rgba_to_png(width, height, rgba))
+}
+
+#[cfg(test)]
+mod clip_rect_to_scissor_tests {
+    use super::clip_rect_to_scissor;
+
+    #[test]
+    fn clip_past_right_edge_yields_zero_width_within_target() {
+        let canvas_w = 100u32;
+        let canvas_h = 50u32;
+        let (sx, sy, sw, sh) = clip_rect_to_scissor(100.0, 0.0, 10.0, 10.0, canvas_w, canvas_h);
+        assert_eq!((sx, sy, sw, sh), (100, 0, 0, 10));
+        assert!(sx.saturating_add(sw) <= canvas_w);
+        assert!(sy.saturating_add(sh) <= canvas_h);
+    }
+
+    #[test]
+    fn clip_past_bottom_edge_yields_zero_height_within_target() {
+        let canvas_w = 80u32;
+        let canvas_h = 60u32;
+        let (sx, sy, sw, sh) = clip_rect_to_scissor(0.0, 60.0, 80.0, 4.0, canvas_w, canvas_h);
+        assert_eq!((sx, sy, sw, sh), (0, 60, 80, 0));
+        assert!(sx.saturating_add(sw) <= canvas_w);
+        assert!(sy.saturating_add(sh) <= canvas_h);
+    }
 }
