@@ -16,6 +16,12 @@ use super::text::{break_inline_runs, break_text, text_block_height};
 
 #[derive(Debug, Clone)]
 pub enum DrawCommand {
+    /// Multiply alpha for subsequent primitives until matching [`DrawCommand::PopOpacity`].
+    PushOpacity { alpha: f32 },
+    PopOpacity,
+    /// Clip to axis-aligned rect (page coords, top-left origin) until [`DrawCommand::PopClip`].
+    PushClipRect { x: f32, y: f32, w: f32, h: f32 },
+    PopClip,
     Rect {
         x: f32,
         y: f32,
@@ -226,6 +232,16 @@ impl<'a> Paginator<'a> {
 
         self.cursor_y += margin_top;
 
+        let wrap_opacity = styles.opacity < 1.0 - 1e-4;
+        let wrap_clip = styles.overflow_clip;
+        let est_h_for_clip = self.estimate_height(node_idx).max(1.0);
+
+        if wrap_opacity {
+            self.push_cmd(DrawCommand::PushOpacity {
+                alpha: styles.opacity.clamp(0.0, 1.0),
+            });
+        }
+
         if let Some(bg) = styles.background {
             if !matches!(
                 &node.content,
@@ -242,6 +258,15 @@ impl<'a> Paginator<'a> {
                     stroke_width: 0.0,
                 });
             }
+        }
+
+        if wrap_clip {
+            self.push_cmd(DrawCommand::PushClipRect {
+                x: block_x,
+                y: self.cursor_y,
+                w: node.width.max(1.0),
+                h: est_h_for_clip,
+            });
         }
 
         let consumed = match node.content.clone() {
@@ -427,6 +452,14 @@ impl<'a> Paginator<'a> {
                 }
             }
         };
+
+        if wrap_clip {
+            self.push_cmd(DrawCommand::PopClip);
+        }
+
+        if wrap_opacity {
+            self.push_cmd(DrawCommand::PopOpacity);
+        }
 
         self.cursor_y += margin_bottom;
         consumed + margin_top + margin_bottom
@@ -897,6 +930,61 @@ mod tests {
     }
 
     #[test]
+    fn opacity_wrap_emits_push_pop_around_content() {
+        let mut arena = DocumentArena::new();
+
+        let mut p_styles = ResolvedStyles::for_kind(&BoxKind::Paragraph);
+        p_styles.opacity = 0.4;
+
+        let p_id = arena.alloc(StyledBox {
+            id: "p-1".to_string(),
+            kind: BoxKind::Paragraph,
+            styles: p_styles,
+            content: BoxContent::Text("x".to_string()),
+        });
+
+        let page_id = arena.alloc(StyledBox {
+            id: "page-1".to_string(),
+            kind: BoxKind::Page,
+            styles: ResolvedStyles::for_kind(&BoxKind::Page),
+            content: BoxContent::Children(vec![p_id]),
+        });
+        arena.add_root(page_id);
+
+        let layout = LayoutTree {
+            nodes: vec![
+                LayoutBox {
+                    arena_id: page_id,
+                    kind: BoxKind::Page,
+                    x: PAGE_MARGIN_PT,
+                    y: PAGE_MARGIN_PT,
+                    width: CONTENT_WIDTH_PT,
+                    height: 200.0,
+                    content: LayoutContent::Children(vec![1]),
+                },
+                LayoutBox {
+                    arena_id: p_id,
+                    kind: BoxKind::Paragraph,
+                    x: PAGE_MARGIN_PT,
+                    y: PAGE_MARGIN_PT,
+                    width: CONTENT_WIDTH_PT,
+                    height: 20.0,
+                    content: LayoutContent::Text("x".to_string()),
+                },
+            ],
+            roots: vec![0],
+        };
+
+        let pages = paginate(&layout, &arena);
+        let cmds = &pages.pages[0].commands;
+        assert!(
+            cmds.iter().any(|c| matches!(c, DrawCommand::PushOpacity { alpha } if (*alpha - 0.4).abs() < 1e-4)),
+            "expected PushOpacity(0.4), got {cmds:?}"
+        );
+        assert!(cmds.iter().any(|c| matches!(c, DrawCommand::PopOpacity)));
+    }
+
+    #[test]
     fn place_node_background_uses_node_width_for_narrow_cells() {
         let mut arena = DocumentArena::new();
 
@@ -1101,102 +1189,6 @@ mod tests {
         assert!(
             has_feature_text,
             "table cell content from LayoutContent::Children must render text"
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::arena::DocumentArena;
-    use crate::engine::layout::LayoutBox;
-    use crate::engine::styles::{BoxContent, ResolvedStyles, StyledBox};
-
-    fn approx_eq(a: f32, b: f32) -> bool {
-        (a - b).abs() < 0.01
-    }
-
-    #[test]
-    fn place_node_background_uses_node_width_for_narrow_cells() {
-        let mut arena = DocumentArena::new();
-
-        let mut cell_styles = ResolvedStyles::for_kind(&BoxKind::Cell);
-        let bg = Color::from_hex(0xD1D5DB);
-        cell_styles.background = Some(bg);
-
-        let cell_id = arena.alloc(StyledBox {
-            id: "cell-1".to_string(),
-            kind: BoxKind::Cell,
-            styles: cell_styles,
-            content: BoxContent::Text("Narrow grid cell".to_string()),
-        });
-
-        let page_id = arena.alloc(StyledBox {
-            id: "page-1".to_string(),
-            kind: BoxKind::Page,
-            styles: ResolvedStyles::for_kind(&BoxKind::Page),
-            content: BoxContent::Children(vec![cell_id]),
-        });
-        arena.add_root(page_id);
-
-        let cell_x = 301.0;
-        let cell_w = 120.0;
-
-        let layout = LayoutTree {
-            nodes: vec![
-                LayoutBox {
-                    arena_id: page_id,
-                    kind: BoxKind::Page,
-                    x: PAGE_MARGIN_PT,
-                    y: PAGE_MARGIN_PT,
-                    width: CONTENT_WIDTH_PT,
-                    height: 200.0,
-                    content: LayoutContent::Children(vec![1]),
-                },
-                LayoutBox {
-                    arena_id: cell_id,
-                    kind: BoxKind::Cell,
-                    x: cell_x,
-                    y: PAGE_MARGIN_PT,
-                    width: cell_w,
-                    height: 40.0,
-                    content: LayoutContent::Text("Narrow grid cell".to_string()),
-                },
-            ],
-            roots: vec![0],
-        };
-
-        let pages = paginate(&layout, &arena);
-        let page = pages.pages.first().expect("expected a rendered page");
-
-        let bg_rect = page
-            .commands
-            .iter()
-            .find_map(|cmd| match cmd {
-                DrawCommand::Rect {
-                    x,
-                    y: _,
-                    w,
-                    h: _,
-                    fill,
-                    stroke: _,
-                    stroke_width: _,
-                } if *fill == Some(bg) => Some((*x, *w)),
-                _ => None,
-            })
-            .expect("expected background rect for cell");
-
-        assert!(
-            approx_eq(bg_rect.0, cell_x),
-            "background x must match cell x"
-        );
-        assert!(
-            approx_eq(bg_rect.1, cell_w),
-            "background width must match cell width"
-        );
-        assert!(
-            bg_rect.0 + bg_rect.1 <= A4_WIDTH_PT + 0.01,
-            "background must not overflow page width for this narrow cell"
         );
     }
 }
