@@ -5,6 +5,9 @@ import Quartz
 @objc(PreviewViewController)
 class PreviewViewController: NSViewController, QLPreviewingController {
 
+    /// Last file URL passed to `preparePreviewOfFile` (for debug logging).
+    private var lastPreviewDocumentURL: URL?
+
     private let pdfView = PDFView()
     private let thumbnailView = PDFThumbnailView()
     private let errorLabel: NSTextField = {
@@ -69,6 +72,16 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private func showPDF(data: Data) {
         errorLabel.isHidden = true
         thumbnailView.isHidden = false
+        // #region agent log
+        let pcInit = PDFDocument(data: data)?.pageCount ?? -1
+        LuraAgentSessionLog.append(
+            hypothesisId: "H1",
+            location: "PreviewViewController.showPDF",
+            message: "document_set",
+            data: ["pdfBytes": data.count, "pageCountFromDoc": pcInit],
+            siblingToDocument: lastPreviewDocumentURL
+        )
+        // #endregion
         pdfView.document = PDFDocument(data: data)
         DispatchQueue.main.async { [weak self] in
             self?.scrollPDFToStart()
@@ -78,23 +91,93 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     /// Let PDFKit lay out the continuous strip, then jump to page 1. No manual NSScrollView bounds
     /// (that broke document coordinates). A slightly delayed pass catches late layout.
     private func scrollPDFToStart() {
+        // #region agent log
+        func logScroll(phase: String) {
+            let d = self.pdfView.document
+            let pc = d?.pageCount ?? -1
+            let idx = d.flatMap { doc in self.pdfView.currentPage.map { doc.index(for: $0) } } ?? -1
+            let scrollY = self.pdfView.enclosingScrollView?.contentView.bounds.origin.y ?? -1.0
+            LuraAgentSessionLog.append(
+                hypothesisId: "H3",
+                location: "PreviewViewController.scrollPDFToStart",
+                message: phase,
+                data: [
+                    "pageCount": pc,
+                    "currentPageIndex": idx,
+                    "scrollOriginY": scrollY,
+                ],
+                siblingToDocument: self.lastPreviewDocumentURL
+            )
+        }
+        logScroll(phase: "before_snap")
+        // #endregion
         func snap() {
             pdfView.layoutDocumentView()
             pdfView.goToFirstPage(nil)
         }
         snap()
+        // #region agent log
+        logScroll(phase: "after_snap")
+        // #endregion
         DispatchQueue.main.async { [weak self] in
-            self?.pdfView.layoutDocumentView()
-            self?.pdfView.goToFirstPage(nil)
+            guard let self = self else { return }
+            self.pdfView.layoutDocumentView()
+            self.pdfView.goToFirstPage(nil)
+            // #region agent log
+            let d = self.pdfView.document
+            let pc = d?.pageCount ?? -1
+            let idx = d.flatMap { doc in self.pdfView.currentPage.map { doc.index(for: $0) } } ?? -1
+            let scrollY = self.pdfView.enclosingScrollView?.contentView.bounds.origin.y ?? -1.0
+            LuraAgentSessionLog.append(
+                hypothesisId: "H3",
+                location: "PreviewViewController.scrollPDFToStart",
+                message: "after_async_main",
+                data: ["pageCount": pc, "currentPageIndex": idx, "scrollOriginY": scrollY],
+                siblingToDocument: self.lastPreviewDocumentURL
+            )
+            // #endregion
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
-            self?.pdfView.layoutDocumentView()
-            self?.pdfView.goToFirstPage(nil)
+            guard let self = self else { return }
+            self.pdfView.layoutDocumentView()
+            self.pdfView.goToFirstPage(nil)
+            // #region agent log
+            let d = self.pdfView.document
+            let pc = d?.pageCount ?? -1
+            let idx = d.flatMap { doc in self.pdfView.currentPage.map { doc.index(for: $0) } } ?? -1
+            let scrollY = self.pdfView.enclosingScrollView?.contentView.bounds.origin.y ?? -1.0
+            LuraAgentSessionLog.append(
+                hypothesisId: "H3",
+                location: "PreviewViewController.scrollPDFToStart",
+                message: "after_delay_006",
+                data: ["pageCount": pc, "currentPageIndex": idx, "scrollOriginY": scrollY],
+                siblingToDocument: self.lastPreviewDocumentURL
+            )
+            // #endregion
         }
     }
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
+        lastPreviewDocumentURL = url
+        // #region agent log
+        LuraAgentSessionLog.append(
+            hypothesisId: "H1",
+            location: "PreviewViewController.preparePreviewOfFile",
+            message: "entry",
+            data: ["file": url.lastPathComponent],
+            siblingToDocument: url
+        )
+        // #endregion
         if let sidecar = LuraPreviewSidecar.pdfIfFresh(documentURL: url) {
+            // #region agent log
+            LuraAgentSessionLog.append(
+                hypothesisId: "H1",
+                location: "PreviewViewController.preparePreviewOfFile",
+                message: "branch_sidecar",
+                data: ["bytes": sidecar.count],
+                siblingToDocument: url
+            )
+            // #endregion
             showPDF(data: sidecar)
             handler(nil)
             return
@@ -110,6 +193,15 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
 
         if let cached = LuraPreviewDiskCache.pdf(forDocumentData: fileData) {
+            // #region agent log
+            LuraAgentSessionLog.append(
+                hypothesisId: "H2",
+                location: "PreviewViewController.preparePreviewOfFile",
+                message: "branch_disk_cache",
+                data: ["bytes": cached.count, "srcFileBytes": fileData.count],
+                siblingToDocument: url
+            )
+            // #endregion
             showPDF(data: cached)
             handler(nil)
             return
@@ -145,6 +237,15 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             return
         }
 
+        // #region agent log
+        LuraAgentSessionLog.append(
+            hypothesisId: "H2",
+            location: "PreviewViewController.preparePreviewOfFile",
+            message: "branch_ffi_dlopen",
+            data: ["srcChars": contentStr.count],
+            siblingToDocument: url
+        )
+        // #endregion
         let out = LuraPdfFFI.invokeRender(
             source: contentStr,
             symRender: symRender,

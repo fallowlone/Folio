@@ -33,6 +33,8 @@ pub enum PainterCommand {
         bold: bool,
         italic: bool,
         color: Color,
+        link_uri: Option<String>,
+        link_width_pt: Option<f32>,
     },
 }
 
@@ -146,6 +148,8 @@ fn map_command(cmd: &DrawCommand) -> PainterCommand {
             bold,
             italic,
             color,
+            link_uri,
+            link_width_pt,
         } => PainterCommand::Text {
             content: content.clone(),
             x: *x,
@@ -155,6 +159,8 @@ fn map_command(cmd: &DrawCommand) -> PainterCommand {
             bold: *bold,
             italic: *italic,
             color: *color,
+            link_uri: link_uri.clone(),
+            link_width_pt: *link_width_pt,
         },
     }
 }

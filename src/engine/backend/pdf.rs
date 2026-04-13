@@ -4,7 +4,7 @@
 /// Uses the `pdf-writer` crate: low-level but fast.
 ///
 /// Supported commands:
-/// - `Text`  → PDF BT ... ET (built-in fonts: Helvetica / Helvetica-Bold)
+/// - `Text`  → PDF BT ... ET (built-in Type1: Helvetica family + Courier family, incl. oblique)
 /// - `Rect`  → PDF re + f/S
 /// - `Line`  → PDF m + l + S
 /// - `PushOpacity` / `PopOpacity` → `q` / `Q` + `ExtGState` (`ca` / `CA`)
@@ -15,9 +15,54 @@
 /// PageTree:   top-left = (0,0), Y increases downward.
 /// Conversion: `pdf_y = page_height - our_y`
 
-use pdf_writer::{Content, Name, Pdf, Rect, Ref, Str};
+use pdf_writer::types::{ActionType, AnnotationType};
+use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use crate::engine::paginate::PageTree;
 use super::painter::{from_page_tree, PaintDocument, PainterBackend, PainterCommand};
+
+#[derive(Debug, Clone)]
+struct LinkSpec {
+    x: f32,
+    y_topdown: f32,
+    width: f32,
+    font_size: f32,
+    uri: String,
+}
+
+fn link_specs_from_commands(commands: &[PainterCommand]) -> Vec<LinkSpec> {
+    let mut out = Vec::new();
+    for cmd in commands {
+        let PainterCommand::Text {
+            content,
+            x,
+            y,
+            font_size,
+            link_uri,
+            link_width_pt,
+            ..
+        } = cmd
+        else {
+            continue;
+        };
+        if content.is_empty() {
+            continue;
+        }
+        let (Some(uri), Some(w)) = (link_uri.as_ref(), link_width_pt) else {
+            continue;
+        };
+        if uri.is_empty() || *w <= 1e-3 {
+            continue;
+        }
+        out.push(LinkSpec {
+            x: *x,
+            y_topdown: *y,
+            width: *w,
+            font_size: *font_size,
+            uri: uri.clone(),
+        });
+    }
+    out
+}
 
 pub fn render(page_tree: &PageTree) -> Vec<u8> {
     let doc = from_page_tree(page_tree);
@@ -33,8 +78,14 @@ impl PainterBackend for PdfBackend {
 
         let catalog_id = alloc.next();
         let pages_id = alloc.next();
-        let font_regular_id = alloc.next();
-        let font_bold_id = alloc.next();
+        let f_helvetica = alloc.next();
+        let f_helvetica_bold = alloc.next();
+        let f_helvetica_oblique = alloc.next();
+        let f_helvetica_bold_oblique = alloc.next();
+        let f_courier = alloc.next();
+        let f_courier_bold = alloc.next();
+        let f_courier_oblique = alloc.next();
+        let f_courier_bold_oblique = alloc.next();
 
         let mut page_ids: Vec<Ref> = Vec::new();
         let mut content_ids: Vec<Ref> = Vec::new();
@@ -42,6 +93,17 @@ impl PainterBackend for PdfBackend {
         for _ in &doc.pages {
             page_ids.push(alloc.next());
             content_ids.push(alloc.next());
+        }
+
+        let page_link_specs: Vec<Vec<LinkSpec>> = doc
+            .pages
+            .iter()
+            .map(|p| link_specs_from_commands(&p.commands))
+            .collect();
+        let mut page_link_annots: Vec<Vec<Ref>> = Vec::with_capacity(doc.pages.len());
+        for specs in &page_link_specs {
+            let refs: Vec<Ref> = (0..specs.len()).map(|_| alloc.next()).collect();
+            page_link_annots.push(refs);
         }
 
         // Per-page opacity → ExtGState objects (refs allocated before page bodies).
@@ -74,30 +136,48 @@ impl PainterBackend for PdfBackend {
             pages.count(page_ids.len() as i32);
         }
 
-        // --- Built-in Type1 fonts ---
-        pdf.type1_font(font_regular_id)
-            .base_font(Name(b"Helvetica"))
-            .encoding_predefined(Name(b"WinAnsiEncoding"));
-        pdf.type1_font(font_bold_id)
-            .base_font(Name(b"Helvetica-Bold"))
-            .encoding_predefined(Name(b"WinAnsiEncoding"));
+        // --- Built-in Type1 fonts (PDF 1.7 standard 14 subset we use) ---
+        for (id, name) in [
+            (f_helvetica, b"Helvetica" as &[u8]),
+            (f_helvetica_bold, b"Helvetica-Bold"),
+            (f_helvetica_oblique, b"Helvetica-Oblique"),
+            (f_helvetica_bold_oblique, b"Helvetica-BoldOblique"),
+            (f_courier, b"Courier"),
+            (f_courier_bold, b"Courier-Bold"),
+            (f_courier_oblique, b"Courier-Oblique"),
+            (f_courier_bold_oblique, b"Courier-BoldOblique"),
+        ] {
+            pdf.type1_font(id)
+                .base_font(Name(name))
+                .encoding_predefined(Name(b"WinAnsiEncoding"));
+        }
 
-        // --- Pages ---
+               // --- Pages ---
         for (i, page) in doc.pages.iter().enumerate() {
             let page_id = page_ids[i];
             let content_id = content_ids[i];
             let (alphas, gs_refs, gs_names) = &page_opacity[i];
+            let link_refs = &page_link_annots[i];
 
             {
                 let mut p = pdf.page(page_id);
                 p.media_box(Rect::new(0.0, 0.0, page.width, page.height));
                 p.parent(pages_id);
                 p.contents(content_id);
+                if !link_refs.is_empty() {
+                    p.annotations(link_refs.iter().copied());
+                }
                 let mut res = p.resources();
                 {
                     let mut fonts = res.fonts();
-                    fonts.pair(Name(b"F1"), font_regular_id);
-                    fonts.pair(Name(b"F2"), font_bold_id);
+                    fonts.pair(Name(b"F1"), f_helvetica);
+                    fonts.pair(Name(b"F2"), f_helvetica_bold);
+                    fonts.pair(Name(b"F3"), f_helvetica_oblique);
+                    fonts.pair(Name(b"F4"), f_helvetica_bold_oblique);
+                    fonts.pair(Name(b"F5"), f_courier);
+                    fonts.pair(Name(b"F6"), f_courier_bold);
+                    fonts.pair(Name(b"F7"), f_courier_oblique);
+                    fonts.pair(Name(b"F8"), f_courier_bold_oblique);
                 }
                 if !alphas.is_empty() {
                     let mut ext = res.ext_g_states();
@@ -110,6 +190,52 @@ impl PainterBackend for PdfBackend {
             let buf = build_content_stream(page.height, &page.commands, alphas, gs_names);
             pdf.stream(content_id, buf.as_slice());
         }
+
+        for (i, page) in doc.pages.iter().enumerate() {
+            let specs = &page_link_specs[i];
+            let refs = &page_link_annots[i];
+            for (spec, &annot_id) in specs.iter().zip(refs.iter()) {
+                let pdf_y = page.height - spec.y_topdown;
+                let descent = spec.font_size * 0.22;
+                let ascent = spec.font_size * 0.78;
+                let rect = Rect::new(
+                    spec.x,
+                    pdf_y - descent,
+                    spec.x + spec.width,
+                    pdf_y + ascent,
+                );
+                let mut ann = pdf.annotation(annot_id);
+                ann.subtype(AnnotationType::Link);
+                ann.rect(rect);
+                ann.contents(TextStr(spec.uri.as_str()));
+                ann.action()
+                    .action_type(ActionType::Uri)
+                    .uri(Str(spec.uri.as_bytes()));
+                ann.finish();
+            }
+        }
+
+        // #region agent log
+        {
+            use std::io::Write;
+            let total_links: usize = page_link_specs.iter().map(|v| v.len()).sum();
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/Users/artemmac/programming/personal/lura/.cursor/debug-8cc234.log")
+            {
+                let _ = writeln!(
+                    f,
+                    r#"{{"sessionId":"8cc234","hypothesisId":"L","location":"pdf.rs:render_document","message":"pdf_link_annotations_written","data":{{"total_links":{}}},"timestamp":{}}}"#,
+                    total_links, ts
+                );
+            }
+        }
+        // #endregion
 
         pdf.finish()
     }
@@ -194,7 +320,18 @@ fn build_content_stream(
                 content.stroke();
             }
 
-            PainterCommand::Text { content: text, x, y, font_size, bold, color, .. } => {
+            PainterCommand::Text {
+                content: text,
+                x,
+                y,
+                font_size,
+                font_family,
+                bold,
+                italic,
+                color,
+                link_uri: _,
+                link_width_pt: _,
+            } => {
                 // Must emit space-only runs: layout positions words using explicit x, but skipping
                 // whitespace here removed all space glyphs and made adjacent words touch.
                 if text.is_empty() {
@@ -203,7 +340,7 @@ fn build_content_stream(
 
                 // Y: our y is top-down baseline; PDF y is bottom-up baseline
                 let pdf_y = page_height - y;
-                let font_name: &[u8] = if *bold { b"F2" } else { b"F1" };
+                let font_name = pdf_font_resource_name(*bold, *italic, font_family);
 
                 content.set_fill_rgb(color.r, color.g, color.b);
                 content.begin_text();
@@ -219,6 +356,25 @@ fn build_content_stream(
 }
 
 // --- Utilities ---
+
+fn is_monospace_family(family: &str) -> bool {
+    let l = family.to_ascii_lowercase();
+    l.contains("courier") || l.contains("mono")
+}
+
+/// Resource name embedded in the content stream (F1…F8).
+fn pdf_font_resource_name(bold: bool, italic: bool, font_family: &str) -> &'static [u8] {
+    match (is_monospace_family(font_family), bold, italic) {
+        (false, false, false) => b"F1",
+        (false, true, false) => b"F2",
+        (false, false, true) => b"F3",
+        (false, true, true) => b"F4",
+        (true, false, false) => b"F5",
+        (true, true, false) => b"F6",
+        (true, false, true) => b"F7",
+        (true, true, true) => b"F8",
+    }
+}
 
 /// Encode UTF-8 → WinAnsiEncoding (cp1252).
 /// Standard Latin-1 (0x00–0xFF) is preserved as-is.

@@ -21,6 +21,7 @@ struct GlyphMetrics {
     units_per_em: u16,
 }
 
+#[derive(Clone)]
 struct FontSource {
     data: Arc<[u8]>,
     face_index: u32,
@@ -29,10 +30,14 @@ struct FontSource {
 struct FontSources {
     regular: Option<FontSource>,
     bold: Option<FontSource>,
+    mono_regular: Option<FontSource>,
+    mono_bold: Option<FontSource>,
 }
 
 static METRICS_REGULAR: OnceLock<Option<GlyphMetrics>> = OnceLock::new();
 static METRICS_BOLD:    OnceLock<Option<GlyphMetrics>> = OnceLock::new();
+static METRICS_MONO_REGULAR: OnceLock<Option<GlyphMetrics>> = OnceLock::new();
+static METRICS_MONO_BOLD: OnceLock<Option<GlyphMetrics>> = OnceLock::new();
 static FONT_SOURCES:    OnceLock<FontSources> = OnceLock::new();
 static TEXT_WIDTH_CACHE: OnceLock<Mutex<HashMap<TextWidthKey, f32>>> = OnceLock::new();
 static BREAK_TEXT_CACHE: OnceLock<Mutex<HashMap<BreakTextKey, Vec<TextLine>>>> = OnceLock::new();
@@ -48,6 +53,7 @@ struct TextWidthKey {
     letter_spacing_bits: u32,
     word_spacing_bits: u32,
     bold: bool,
+    mono: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,7 +112,24 @@ fn load_font_sources() -> FontSources {
         _ => None,
     };
 
-    FontSources { regular, bold }
+    let mono_reg_id = query_mono_font_id(&db, Weight::NORMAL);
+    let mono_bold_id = query_mono_font_id(&db, Weight::BOLD);
+    let mono_regular = mono_reg_id.and_then(|id| extract_font_source(&db, id));
+    let mono_bold = match (mono_bold_id, mono_reg_id, mono_regular.as_ref()) {
+        (Some(bold_m), Some(reg_m), Some(mreg_src)) if bold_m == reg_m => Some(FontSource {
+            data: Arc::clone(&mreg_src.data),
+            face_index: mreg_src.face_index,
+        }),
+        (Some(id), _, _) => extract_font_source(&db, id),
+        _ => mono_regular.clone(),
+    };
+
+    FontSources {
+        regular,
+        bold,
+        mono_regular,
+        mono_bold,
+    }
 }
 
 fn query_font_id(db: &Database, weight: Weight) -> Option<ID> {
@@ -116,6 +139,21 @@ fn query_font_id(db: &Database, weight: Weight) -> Option<ID> {
             Family::Name("Helvetica"),
             Family::Name("Arial"),
             Family::SansSerif,
+        ],
+        weight,
+        style: FontdbStyle::Normal,
+        stretch: Stretch::Normal,
+    })
+}
+
+fn query_mono_font_id(db: &Database, weight: Weight) -> Option<ID> {
+    db.query(&Query {
+        families: &[
+            Family::Name("Menlo"),
+            Family::Name("Monaco"),
+            Family::Name("Courier New"),
+            Family::Name("Courier"),
+            Family::Monospace,
         ],
         weight,
         style: FontdbStyle::Normal,
@@ -148,15 +186,69 @@ fn get_font_source(bold: bool) -> Option<&'static FontSource> {
     }
 }
 
+fn get_font_source_mono(bold: bool) -> Option<&'static FontSource> {
+    let sources = FONT_SOURCES.get_or_init(load_font_sources);
+    if bold {
+        sources
+            .mono_bold
+            .as_ref()
+            .or(sources.mono_regular.as_ref())
+    } else {
+        sources.mono_regular.as_ref()
+    }
+}
+
+fn load_metrics_mono(bold: bool) -> Option<GlyphMetrics> {
+    let source = get_font_source_mono(bold)?;
+    let face = ttf_parser::Face::parse(source.data.as_ref(), source.face_index).ok()?;
+    let units_per_em = face.units_per_em();
+    let mut advances = HashMap::with_capacity(512);
+    for code in 32u32..1024u32 {
+        if let Some(ch) = char::from_u32(code) {
+            if let Some(gid) = face.glyph_index(ch) {
+                if let Some(adv) = face.glyph_hor_advance(gid) {
+                    advances.insert(ch, adv);
+                }
+            }
+        }
+    }
+    for ch in ['•', '–', '—', '…', '"', '"', '€', '©', '®'] {
+        if let Some(gid) = face.glyph_index(ch) {
+            if let Some(adv) = face.glyph_hor_advance(gid) {
+                advances.insert(ch, adv);
+            }
+        }
+    }
+    Some(GlyphMetrics { advances, units_per_em })
+}
+
+fn get_metrics_mono(bold: bool) -> Option<&'static GlyphMetrics> {
+    let lock: &OnceLock<Option<GlyphMetrics>> = if bold {
+        &METRICS_MONO_BOLD
+    } else {
+        &METRICS_MONO_REGULAR
+    };
+    lock.get_or_init(|| load_metrics_mono(bold)).as_ref()
+}
+
 /// Horizontal advance of a character in pt at the given font size.
 pub fn char_advance_pt(ch: char, font_size_pt: f32, bold: bool) -> f32 {
-    if let Some(m) = get_metrics(bold) {
+    char_advance_pt_inner(ch, font_size_pt, bold, false)
+}
+
+fn char_advance_pt_inner(ch: char, font_size_pt: f32, bold: bool, mono: bool) -> f32 {
+    let metrics = if mono {
+        get_metrics_mono(bold).or_else(|| get_metrics_mono(false))
+    } else {
+        get_metrics(bold)
+    };
+    if let Some(m) = metrics {
         if let Some(&adv) = m.advances.get(&ch) {
             return adv as f32 / m.units_per_em as f32 * font_size_pt;
         }
     }
-    // Fallback: conservative approximation
-    font_size_pt * 0.55
+    // Fallback: monospace-ish vs proportional
+    font_size_pt * if mono { 0.6 } else { 0.55 }
 }
 
 /// String width in pt.
@@ -171,6 +263,56 @@ pub fn text_width_pt_with_spacing(
     letter_spacing_pt: f32,
     word_spacing_pt: f32,
 ) -> f32 {
+    text_width_pt_with_spacing_inner(
+        text,
+        font_size_pt,
+        bold,
+        letter_spacing_pt,
+        word_spacing_pt,
+        false,
+    )
+}
+
+/// Lower bound for horizontal advance when drawing with PDF built-in Courier (Core 14).
+/// System monospace metrics (Menlo, etc.) are often narrower than Courier, which caused
+/// layout to place the next fragment too early and overlap monospace runs.
+pub(crate) fn courier_core14_width_floor_pt(text: &str, font_size_pt: f32) -> f32 {
+    text.chars()
+        .map(|c| {
+            if c.is_whitespace() {
+                font_size_pt * 0.35
+            } else {
+                font_size_pt * 0.60
+            }
+        })
+        .sum()
+}
+
+fn text_width_pt_with_spacing_mono(
+    text: &str,
+    font_size_pt: f32,
+    bold: bool,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+) -> f32 {
+    text_width_pt_with_spacing_inner(
+        text,
+        font_size_pt,
+        bold,
+        letter_spacing_pt,
+        word_spacing_pt,
+        true,
+    )
+}
+
+fn text_width_pt_with_spacing_inner(
+    text: &str,
+    font_size_pt: f32,
+    bold: bool,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+    mono: bool,
+) -> f32 {
     let key = TextWidthKey {
         text_hash: stable_hash(text),
         text_len: text.len(),
@@ -178,16 +320,20 @@ pub fn text_width_pt_with_spacing(
         letter_spacing_bits: letter_spacing_pt.to_bits(),
         word_spacing_bits: word_spacing_pt.to_bits(),
         bold,
+        mono,
     };
 
     if let Some(cached) = text_width_cache().lock().ok().and_then(|m| m.get(&key).copied()) {
         return cached;
     }
 
-    let mut width = if let Some(shaped) = shape_text_width_pt(text, font_size_pt, bold) {
+    let mut width = if let Some(shaped) = shape_text_width_pt(text, font_size_pt, bold, mono) {
         shaped
     } else {
-        text.chars().map(|c| char_advance_pt(c, font_size_pt, bold)).sum()
+        text
+            .chars()
+            .map(|c| char_advance_pt_inner(c, font_size_pt, bold, mono))
+            .sum()
     };
 
     if letter_spacing_pt != 0.0 {
@@ -203,11 +349,15 @@ pub fn text_width_pt_with_spacing(
     width
 }
 
-fn shape_text_width_pt(text: &str, font_size_pt: f32, bold: bool) -> Option<f32> {
+fn shape_text_width_pt(text: &str, font_size_pt: f32, bold: bool, mono: bool) -> Option<f32> {
     if text.is_empty() {
         return Some(0.0);
     }
-    let source = get_font_source(bold)?;
+    let source = if mono {
+        get_font_source_mono(bold).or_else(|| get_font_source_mono(false))?
+    } else {
+        get_font_source(bold)?
+    };
     let rb_face = rustybuzz::Face::from_slice(source.data.as_ref(), source.face_index)?;
     let ttf_face = ttf_parser::Face::parse(source.data.as_ref(), source.face_index).ok()?;
     let mut buffer = UnicodeBuffer::new();
@@ -401,6 +551,7 @@ pub fn inline_runs_block_height(
     line_height: f32,
     letter_spacing_pt: f32,
     word_spacing_pt: f32,
+    base_bold: bool,
     justify: bool,
 ) -> f32 {
     let lines = break_inline_runs(
@@ -410,6 +561,7 @@ pub fn inline_runs_block_height(
         line_height,
         letter_spacing_pt,
         word_spacing_pt,
+        base_bold,
         justify,
     );
     inline_lines_block_height(&lines, font_size_pt, line_height)
@@ -422,6 +574,7 @@ pub fn inline_runs_intrinsic_max_line_width_pt(
     line_height: f32,
     letter_spacing_pt: f32,
     word_spacing_pt: f32,
+    base_bold: bool,
 ) -> f32 {
     const HUGE: f32 = 1_000_000.0;
     let lines = break_inline_runs(
@@ -431,6 +584,7 @@ pub fn inline_runs_intrinsic_max_line_width_pt(
         line_height,
         letter_spacing_pt,
         word_spacing_pt,
+        base_bold,
         false,
     );
     lines.iter().map(|l| l.width).fold(0.0f32, f32::max).max(1.0)
@@ -442,16 +596,44 @@ pub fn max_word_width_across_runs(
     font_size_pt: f32,
     letter_spacing_pt: f32,
     word_spacing_pt: f32,
+    base_bold: bool,
 ) -> f32 {
     runs.iter()
         .map(|r| {
-            max_word_width_pt(
-                &r.text,
-                font_size_pt,
-                r.bold,
-                letter_spacing_pt,
-                word_spacing_pt,
-            )
+            let b = base_bold || r.bold;
+            if r.code {
+                max_word_width_mono(
+                    &r.text,
+                    font_size_pt,
+                    b,
+                    letter_spacing_pt,
+                    word_spacing_pt,
+                )
+            } else {
+                max_word_width_pt(
+                    &r.text,
+                    font_size_pt,
+                    b,
+                    letter_spacing_pt,
+                    word_spacing_pt,
+                )
+            }
+        })
+        .fold(0.0f32, f32::max)
+        .max(1.0)
+}
+
+fn max_word_width_mono(
+    text: &str,
+    font_size_pt: f32,
+    bold: bool,
+    letter_spacing_pt: f32,
+    word_spacing_pt: f32,
+) -> f32 {
+    text.split_whitespace()
+        .map(|w| {
+            let m = text_width_pt_with_spacing_mono(w, font_size_pt, bold, letter_spacing_pt, word_spacing_pt);
+            m.max(courier_core14_width_floor_pt(w, font_size_pt))
         })
         .fold(0.0f32, f32::max)
         .max(1.0)
@@ -482,6 +664,7 @@ pub fn break_inline_runs(
     line_height: f32,
     letter_spacing_pt: f32,
     word_spacing_pt: f32,
+    base_bold: bool,
     justify: bool,
 ) -> Vec<InlineLine> {
     let mut lines: Vec<InlineLine> = Vec::new();
@@ -498,14 +681,25 @@ pub fn break_inline_runs(
             parts.push(run.text.clone());
         }
         for part in parts {
-            let bold = run.bold;
-            let width = text_width_pt_with_spacing(
-                &part,
-                font_size_pt,
-                bold,
-                letter_spacing_pt,
-                word_spacing_pt,
-            );
+            let measure_bold = base_bold || run.bold;
+            let width = if run.code {
+                let m = text_width_pt_with_spacing_mono(
+                    &part,
+                    font_size_pt,
+                    measure_bold,
+                    letter_spacing_pt,
+                    word_spacing_pt,
+                );
+                m.max(courier_core14_width_floor_pt(&part, font_size_pt))
+            } else {
+                text_width_pt_with_spacing(
+                    &part,
+                    font_size_pt,
+                    measure_bold,
+                    letter_spacing_pt,
+                    word_spacing_pt,
+                )
+            };
 
             let should_wrap = current.width + width > max_width_pt
                 && !current.fragments.is_empty()
@@ -623,4 +817,57 @@ fn split_preserving_spaces(s: &str) -> Vec<String> {
         out.push(current);
     }
     out
+}
+
+#[cfg(test)]
+mod space_width_tests {
+    use super::*;
+    use crate::engine::styles::InlineRun;
+
+    #[test]
+    fn whitespace_fragments_have_nonzero_width_with_base_bold() {
+        let runs = vec![InlineRun {
+            text: "Lura Capability Showcase 2026".into(),
+            bold: false,
+            italic: false,
+            code: false,
+            link: None,
+        }];
+        let lines = break_inline_runs(&runs, 100_000.0, 12.0, 1.2, 0.0, 0.0, true, false);
+        let frags = &lines[0].fragments;
+        for f in frags {
+            assert!(
+                f.width > 1e-4,
+                "zero-width fragment {:?} (base_bold heading-like)",
+                f.text
+            );
+        }
+    }
+
+    /// Regression: if bold word width is under-measured vs real glyphs, PDF fragments overlap.
+    #[test]
+    fn bold_lura_width_matches_typical_helvetica_bold_advance() {
+        let w = text_width_pt("Lura", 14.0, true);
+        assert!(
+            w > 18.0,
+            "bold 'Lura' at 14pt should be ~25–35pt wide; got {w} (check font shaping / metrics)"
+        );
+    }
+
+    #[test]
+    fn h1_sized_break_inline_first_word_wide_enough() {
+        let runs = vec![InlineRun {
+            text: "Lura Capability".into(),
+            bold: false,
+            italic: false,
+            code: false,
+            link: None,
+        }];
+        let lines = break_inline_runs(&runs, 1_000_000.0, 14.0, 1.2, 0.0, 0.0, true, false);
+        let w0 = lines[0].fragments[0].width;
+        assert!(
+            w0 > 18.0,
+            "first fragment width {w0} with font14 base_bold (H1-like)"
+        );
+    }
 }

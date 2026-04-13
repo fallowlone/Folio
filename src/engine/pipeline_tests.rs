@@ -2,7 +2,7 @@
 
 use crate::engine::arena::{DocumentArena, NodeId};
 use crate::engine::grid_tracks::GridColumnTrack;
-use crate::engine::layout::compute_layout;
+use crate::engine::layout::{compute_layout, LayoutContent, LayoutNodeIdx, LayoutTree};
 use crate::engine::paginate::{paginate, DrawCommand};
 use crate::engine::resolver::build_styled_tree;
 use crate::engine::{render, ExportFormat, ExportOptions};
@@ -220,6 +220,142 @@ fn pipeline_pdf_starts_with_magic_bytes() {
         bytes.len() >= 5 && &bytes[..5] == b"%PDF-",
         "expected PDF header %%-, got {:?}",
         bytes.get(..12.min(bytes.len()))
+    );
+}
+
+/// Inline `[text](url)` must produce a PDF link annotation (clickable in viewers), not only blue text.
+#[test]
+fn pipeline_pdf_inline_link_emits_uri_annotation() {
+    let fol = r#"PAGE(P(Visit [site](https://example.com/path) now.))"#;
+    let doc = load_fol(fol);
+    let bytes = render(
+        &doc,
+        ExportOptions {
+            format: ExportFormat::Pdf,
+        },
+    );
+    assert!(
+        bytes.windows(5).any(|w| w == b"/URI "),
+        "expected /URI action in PDF, len={}",
+        bytes.len()
+    );
+    assert!(
+        bytes.windows(5).any(|w| w == b"/Link"),
+        "expected Link annotation subtype"
+    );
+}
+
+#[test]
+fn table_row_cell_boxes_share_top_y() {
+    let src = r#"PAGE(
+      TABLE(
+        ROW(
+          CELL(P(A))
+          CELL(P(BB))
+          CELL(P(Longer text in middle))
+          CELL(P(D))
+        )
+      )
+    )"#;
+    let doc = load_fol(src);
+    let styled = build_styled_tree(&doc);
+    let layout = compute_layout(&styled);
+    fn collect_cells(layout: &LayoutTree, idx: LayoutNodeIdx, out: &mut Vec<f32>) {
+        let n = &layout.nodes[idx];
+        if matches!(n.kind, BoxKind::Cell) {
+            out.push(n.y);
+        }
+        if let LayoutContent::Children(ch) = &n.content {
+            for &c in ch {
+                collect_cells(layout, c, out);
+            }
+        }
+    }
+    let mut ys = Vec::new();
+    collect_cells(&layout, layout.roots[0], &mut ys);
+    assert!(
+        ys.len() >= 4,
+        "expected4 cells, ys={ys:?}"
+    );
+    let min = ys.iter().copied().fold(f32::INFINITY, f32::min);
+    let max = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        (max - min).abs() < 0.5,
+        "cells in one row should share same layout y; got {ys:?}"
+    );
+}
+
+#[test]
+fn table_cell_paragraph_on_second_fol_paint_y_is_page_local() {
+    // First PAGE: many blocks so `compute_layout` stacks a large `offset_y` before the next root.
+    // Regression: table CELL(P(...)) used raw layout `child.y` (document-absolute) as `cursor_y`,
+    // placing text far below the page when a prior fol was tall.
+    let mut src = String::from("PAGE(");
+    for _ in 0..45 {
+        src.push_str("P(Line of filler to grow first fol layout height.)\n");
+    }
+    src.push_str(")\nPAGE(TABLE(ROW(CELL(P(CellA)) CELL(P(CellB)))))");
+    let doc = load_fol(&src);
+    let styled = build_styled_tree(&doc);
+    let layout = compute_layout(&styled);
+    let tree = paginate(&layout, &styled);
+    let last_page = tree.pages.last().expect("at least one page");
+    let mut hits: Vec<f32> = Vec::new();
+    for cmd in &last_page.commands {
+        if let DrawCommand::Text { y, content, .. } = cmd {
+            if content == "CellA" || content == "CellB" {
+                hits.push(*y);
+            }
+        }
+    }
+    assert!(
+        hits.len() >= 2,
+        "expected both cell labels painted on last page, got {:?}",
+        hits
+    );
+    for y in &hits {
+        assert!(
+            *y > 25.0 && *y < 820.0,
+            "cell paragraph must paint inside A4 content band, got y={}",
+            y
+        );
+    }
+}
+
+#[test]
+fn table_row_paragraph_boxes_share_top_y_within_row() {
+    let src = r#"PAGE(
+      TABLE(
+        ROW(
+          CELL(P(A))
+          CELL(P(BB))
+          CELL(P(Longer text in middle))
+          CELL(P(D))
+        )
+      )
+    )"#;
+    let doc = load_fol(src);
+    let styled = build_styled_tree(&doc);
+    let layout = compute_layout(&styled);
+    fn collect_p_in_table(layout: &LayoutTree, idx: LayoutNodeIdx, out: &mut Vec<f32>) {
+        let n = &layout.nodes[idx];
+        if matches!(n.kind, BoxKind::Paragraph) {
+            out.push(n.y);
+        }
+        if let LayoutContent::Children(ch) = &n.content {
+            for &c in ch {
+                collect_p_in_table(layout, c, out);
+            }
+        }
+    }
+    let mut ys = Vec::new();
+    collect_p_in_table(&layout, layout.roots[0], &mut ys);
+    assert!(ys.len() >= 4, "expected4 P nodes, ys={ys:?}");
+    let min = ys.iter().copied().fold(f32::INFINITY, f32::min);
+    let max = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        (max - min).abs() < 0.5,
+        "paragraphs in one table row should share same y; got {ys:?}"
     );
 }
 

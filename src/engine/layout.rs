@@ -466,6 +466,7 @@ fn measure_inline_leaf(
     available_space: Size<AvailableSpace>,
 ) -> Size<f32> {
     let justify = styles.justify || styles.text_align == TextAlign::Justify;
+    let base_bold = styles.font_weight == FontWeight::Bold;
 
     if let Some(w) = known_dimensions.width {
         let h = inline_runs_block_height(
@@ -475,6 +476,7 @@ fn measure_inline_leaf(
             styles.line_height,
             styles.letter_spacing,
             styles.word_spacing,
+            base_bold,
             justify,
         );
         return Size { width: w, height: h };
@@ -490,6 +492,7 @@ fn measure_inline_leaf(
                     styles.line_height,
                     styles.letter_spacing,
                     styles.word_spacing,
+                    base_bold,
                 )
             }
             AvailableSpace::MinContent => max_word_width_across_runs(
@@ -497,6 +500,7 @@ fn measure_inline_leaf(
                 styles.font_size,
                 styles.letter_spacing,
                 styles.word_spacing,
+                base_bold,
             ),
         };
         return Size { width: w, height: h };
@@ -511,6 +515,7 @@ fn measure_inline_leaf(
                 styles.line_height,
                 styles.letter_spacing,
                 styles.word_spacing,
+                base_bold,
                 false,
             );
             let w = lines.iter().map(|l| l.width).fold(0.0f32, f32::max).max(1.0);
@@ -523,6 +528,7 @@ fn measure_inline_leaf(
                 styles.font_size,
                 styles.letter_spacing,
                 styles.word_spacing,
+                base_bold,
             );
             let h = inline_runs_block_height(
                 runs,
@@ -531,6 +537,7 @@ fn measure_inline_leaf(
                 styles.line_height,
                 styles.letter_spacing,
                 styles.word_spacing,
+                base_bold,
                 justify,
             );
             Size { width: mw, height: h }
@@ -544,6 +551,7 @@ fn measure_inline_leaf(
                 styles.line_height,
                 styles.letter_spacing,
                 styles.word_spacing,
+                base_bold,
                 justify,
             );
             Size { width: w, height: h }
