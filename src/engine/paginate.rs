@@ -9,7 +9,7 @@ use super::layout::{
     text_container_width_pt, LayoutContent, LayoutNodeIdx, LayoutTree, A4_HEIGHT_PT, A4_WIDTH_PT,
     CONTENT_WIDTH_PT, MM_TO_PT, PAGE_MARGIN_PT,
 };
-use super::styles::{BoxKind, Color, FloatMode, FontStyle, FontWeight, ListStyle};
+use super::styles::{BoxKind, Color, FloatMode, FontStyle, FontWeight, InlineRun, ListStyle};
 use super::text::{
     break_inline_runs, break_text, inline_lines_block_height, inline_runs_block_height, text_block_height,
 };
@@ -50,6 +50,10 @@ pub enum DrawCommand {
         bold: bool,
         italic: bool,
         color: Color,
+        /// When set, PDF/SVG backends emit a clickable link to this URI.
+        link_uri: Option<String>,
+        /// Horizontal extent in pt for link hit area (fragment advance); set with `link_uri`.
+        link_width_pt: Option<f32>,
     },
 }
 
@@ -183,6 +187,8 @@ impl<'a> Paginator<'a> {
             bold: false,
             italic: false,
             color: Color::from_hex(0x4B5563),
+            link_uri: None,
+            link_width_pt: None,
         });
         self.cursor_y += h;
     }
@@ -198,6 +204,8 @@ impl<'a> Paginator<'a> {
                 bold: false,
                 italic: false,
                 color: Color::from_hex(0x6B7280),
+                link_uri: None,
+                link_width_pt: None,
             });
         }
         if let Some(footer) = &self.page_footer {
@@ -210,6 +218,8 @@ impl<'a> Paginator<'a> {
                 bold: false,
                 italic: false,
                 color: Color::from_hex(0x6B7280),
+                link_uri: None,
+                link_width_pt: None,
             });
         }
     }
@@ -277,7 +287,7 @@ impl<'a> Paginator<'a> {
                 // ListItem uses `place_list_item` (bullet). Must not `return` early: opacity/clip
                 // wraps were already pushed above and need PopClip/PopOpacity after this arm.
                 if matches!(node.kind, BoxKind::ListItem) {
-                    self.place_list_item(node_idx, &text, margin_top, margin_bottom)
+                    self.place_list_item(node_idx, &text)
                 } else {
                     let width = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
                     let lines = break_text(
@@ -321,6 +331,8 @@ impl<'a> Paginator<'a> {
                             bold,
                             italic: styles.font_style == FontStyle::Italic,
                             color: styles.color,
+                            link_uri: None,
+                            link_width_pt: None,
                         });
                     }
                     self.cursor_y += block_h;
@@ -337,6 +349,7 @@ impl<'a> Paginator<'a> {
                     styles.line_height,
                     styles.letter_spacing,
                     styles.word_spacing,
+                    bold,
                     justify,
                 );
                 let block_h = inline_lines_block_height(&lines, styles.font_size, styles.line_height);
@@ -383,6 +396,8 @@ impl<'a> Paginator<'a> {
                             } else {
                                 styles.color
                             },
+                            link_uri: frag.link.clone(),
+                            link_width_pt: frag.link.as_ref().map(|_| frag.width),
                         });
                         if frag.link.is_some() && !frag.text.trim().is_empty() {
                             let underline_y = baseline_y + 1.0;
@@ -418,6 +433,7 @@ impl<'a> Paginator<'a> {
                     self.list_item_counter = None;
                     total
                 }
+                BoxKind::ListItem => self.place_list_item_children(node_idx, child_indices),
                 _ => {
                     let mut total = 0.0f32;
                     for child_idx in child_indices {
@@ -465,13 +481,7 @@ impl<'a> Paginator<'a> {
 
     // --- List item with bullet ---
 
-    fn place_list_item(
-        &mut self,
-        node_idx: LayoutNodeIdx,
-        text: &str,
-        margin_top: f32,
-        margin_bottom: f32,
-    ) -> f32 {
+    fn place_list_item(&mut self, node_idx: LayoutNodeIdx, text: &str) -> f32 {
         let node = self.layout.nodes[node_idx].clone();
         let styles = self.styled.get(node.arena_id).styles.clone();
         let bold = styles.font_weight == FontWeight::Bold;
@@ -508,6 +518,8 @@ impl<'a> Paginator<'a> {
             bold: false,
             italic: false,
             color: styles.color,
+            link_uri: None,
+            link_width_pt: None,
         });
 
         for (i, line) in lines.iter().enumerate() {
@@ -524,11 +536,128 @@ impl<'a> Paginator<'a> {
                 bold,
                 italic: styles.font_style == FontStyle::Italic,
                 color: styles.color,
+                link_uri: None,
+                link_width_pt: None,
             });
         }
 
-        self.cursor_y += block_h + margin_bottom;
-        block_h + margin_top + margin_bottom
+        self.cursor_y += block_h;
+        block_h
+    }
+
+    /// `ITEM(P(...))` and similar: layout has children, not direct text — draw marker + body.
+    fn place_list_item_children(
+        &mut self,
+        list_item_idx: LayoutNodeIdx,
+        child_indices: Vec<LayoutNodeIdx>,
+    ) -> f32 {
+        if child_indices.is_empty() {
+            return 0.0;
+        }
+        if child_indices.len() == 1 {
+            let child_idx = child_indices[0];
+            match &self.layout.nodes[child_idx].content.clone() {
+                LayoutContent::Text(t) => return self.place_list_item(list_item_idx, t),
+                LayoutContent::Inline(runs) => {
+                    return self.place_list_item_inline(list_item_idx, runs);
+                }
+                _ => {}
+            }
+        }
+        let mut total = 0.0f32;
+        for child_idx in child_indices {
+            total += self.place_node(child_idx);
+        }
+        total
+    }
+
+    fn place_list_item_inline(&mut self, list_item_idx: LayoutNodeIdx, runs: &[InlineRun]) -> f32 {
+        let node = self.layout.nodes[list_item_idx].clone();
+        let styles = self.styled.get(node.arena_id).styles.clone();
+        let bold = styles.font_weight == FontWeight::Bold;
+        let width = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
+        let justify = styles.justify || styles.text_align == super::styles::TextAlign::Justify;
+        let lines = break_inline_runs(
+            runs,
+            width,
+            styles.font_size,
+            styles.line_height,
+            styles.letter_spacing,
+            styles.word_spacing,
+            bold,
+            justify,
+        );
+        let block_h = inline_lines_block_height(&lines, styles.font_size, styles.line_height);
+
+        if self.cursor_y + block_h > CONTENT_BOTTOM && self.cursor_y > CONTENT_TOP {
+            self.new_page();
+        }
+
+        let bullet_text = match self.list_item_counter {
+            Some(n) => format!("{}.", n),
+            None => "\u{2022}".to_string(),
+        };
+        let bullet_x = node.x - 4.5 * MM_TO_PT;
+        let bullet_y = self.cursor_y + styles.font_size;
+        self.push_cmd(DrawCommand::Text {
+            content: bullet_text,
+            x: bullet_x,
+            y: bullet_y,
+            font_size: styles.font_size,
+            font_family: styles.font_family.clone(),
+            bold: false,
+            italic: false,
+            color: styles.color,
+            link_uri: None,
+            link_width_pt: None,
+        });
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let baseline_y =
+                self.cursor_y + styles.font_size + line_idx as f32 * line.line_height_pt;
+            if baseline_y > CONTENT_BOTTOM {
+                break;
+            }
+            let mut x_cursor = node.x;
+            for frag in &line.fragments {
+                let frag_font_family = if frag.code {
+                    "Courier".to_string()
+                } else {
+                    styles.font_family.clone()
+                };
+                self.push_cmd(DrawCommand::Text {
+                    content: frag.text.clone(),
+                    x: x_cursor,
+                    y: baseline_y,
+                    font_size: styles.font_size,
+                    font_family: frag_font_family,
+                    bold: bold || frag.bold,
+                    italic: (styles.font_style == FontStyle::Italic) || frag.italic,
+                    color: if frag.link.is_some() {
+                        Color::from_hex(0x1D4ED8)
+                    } else {
+                        styles.color
+                    },
+                    link_uri: frag.link.clone(),
+                    link_width_pt: frag.link.as_ref().map(|_| frag.width),
+                });
+                if frag.link.is_some() && !frag.text.trim().is_empty() {
+                    let underline_y = baseline_y + 1.0;
+                    self.push_cmd(DrawCommand::Line {
+                        x1: x_cursor,
+                        y1: underline_y,
+                        x2: x_cursor + frag.width.max(0.0),
+                        y2: underline_y,
+                        color: Color::from_hex(0x1D4ED8),
+                        width: 0.5,
+                    });
+                }
+                x_cursor += frag.width;
+            }
+        }
+
+        self.cursor_y += block_h;
+        block_h
     }
 
     // ─── GRID ─────────────────────────────────────────────────────────────────
@@ -540,22 +669,28 @@ impl<'a> Paginator<'a> {
         let grid_start_y = self.cursor_y;
 
         for row_cells in child_indices.chunks(cols) {
+            if row_cells.is_empty() {
+                continue;
+            }
             let row_start_y = self.cursor_y;
-            let mut max_h = 0.0f32;
+            let row_min_y = row_cells
+                .iter()
+                .map(|&ci| self.layout.nodes[ci].y)
+                .fold(f32::INFINITY, f32::min);
+            let mut max_bottom = row_start_y;
 
             for &ci in row_cells {
-                // Reset cursor_y to row start for each cell
-                self.cursor_y = row_start_y;
+                let cell_y = self.layout.nodes[ci].y;
+                let dy = cell_y - row_min_y;
+                self.cursor_y = row_start_y + dy;
+                let top_before = self.cursor_y;
                 self.place_node(ci);
-                // Track max row height
-                let cell_h = self.cursor_y - row_start_y;
-                if cell_h > max_h {
-                    max_h = cell_h;
-                }
+                max_bottom = max_bottom.max(self.cursor_y);
+                // Ensure row height covers taffy vertical offset + painted extent
+                max_bottom = max_bottom.max(top_before + (self.layout.nodes[ci].height).max(0.0));
             }
 
-            // Advance cursor by the tallest cell in the row
-            self.cursor_y = row_start_y + max_h;
+            self.cursor_y = max_bottom;
         }
 
         self.cursor_y - grid_start_y
@@ -593,6 +728,11 @@ impl<'a> Paginator<'a> {
                 continue;
             }
 
+            let row_min_cell_y = cell_indices
+                .iter()
+                .map(|&ci| self.layout.nodes[ci].y)
+                .fold(f32::INFINITY, f32::min);
+
             // Row height = max over cells
             let row_height = cell_indices
                 .iter()
@@ -626,6 +766,8 @@ impl<'a> Paginator<'a> {
                                 cell_styles.padding.left,
                                 cell_styles.padding.right,
                             );
+                            let justify = cell_styles.justify
+                                || cell_styles.text_align == super::styles::TextAlign::Justify;
                             inline_runs_block_height(
                                 runs,
                                 w,
@@ -633,7 +775,8 @@ impl<'a> Paginator<'a> {
                                 cell_styles.line_height,
                                 cell_styles.letter_spacing,
                                 cell_styles.word_spacing,
-                                cell_styles.justify,
+                                bold,
+                                justify,
                             ) + cell_styles.padding.top * MM_TO_PT
                                 + cell_styles.padding.bottom * MM_TO_PT
                         }
@@ -685,7 +828,13 @@ impl<'a> Paginator<'a> {
                 let cell_styles = self.styled.get(cell.arena_id).styles.clone();
                 let bold = cell_styles.font_weight == FontWeight::Bold;
                 let padding_top = cell_styles.padding.top * MM_TO_PT;
+                let _padding_bottom = cell_styles.padding.bottom * MM_TO_PT;
                 let padding_left = cell_styles.padding.left * MM_TO_PT;
+
+                // Top-align cell content so the first text baseline lines up across columns in the
+                // same row (vertical centering per cell made multi-line vs single-line cells ragged).
+                let cell_dy = cell.y - row_min_cell_y;
+                let content_top = row_start_y + padding_top + cell_dy;
 
                 // Per-cell background
                 if let Some(cell_bg) = cell_styles.background {
@@ -717,8 +866,7 @@ impl<'a> Paginator<'a> {
                             cell_styles.word_spacing,
                         );
                         for (i, line) in lines.iter().enumerate() {
-                            let y = row_start_y
-                                + padding_top
+                            let y = content_top
                                 + cell_styles.font_size
                                 + i as f32 * line.line_height_pt;
                             if y > CONTENT_BOTTOM {
@@ -733,6 +881,8 @@ impl<'a> Paginator<'a> {
                                 bold,
                                 italic: cell_styles.font_style == FontStyle::Italic,
                                 color: cell_styles.color,
+                                link_uri: None,
+                                link_width_pt: None,
                             });
                         }
                     }
@@ -742,6 +892,8 @@ impl<'a> Paginator<'a> {
                             cell_styles.padding.left,
                             cell_styles.padding.right,
                         );
+                        let justify = cell_styles.justify
+                            || cell_styles.text_align == super::styles::TextAlign::Justify;
                         let lines = break_inline_runs(
                             runs,
                             w,
@@ -749,11 +901,11 @@ impl<'a> Paginator<'a> {
                             cell_styles.line_height,
                             cell_styles.letter_spacing,
                             cell_styles.word_spacing,
-                            cell_styles.justify,
+                            bold,
+                            justify,
                         );
                         for (i, line) in lines.iter().enumerate() {
-                            let baseline_y = row_start_y
-                                + padding_top
+                            let baseline_y = content_top
                                 + cell_styles.font_size
                                 + i as f32 * line.line_height_pt;
                             if baseline_y > CONTENT_BOTTOM {
@@ -780,6 +932,8 @@ impl<'a> Paginator<'a> {
                                     } else {
                                         cell_styles.color
                                     },
+                                    link_uri: frag.link.clone(),
+                                    link_width_pt: frag.link.as_ref().map(|_| frag.width),
                                 });
                                 x_cursor += frag.width;
                             }
@@ -787,8 +941,44 @@ impl<'a> Paginator<'a> {
                     }
                     LayoutContent::Children(children) => {
                         let cursor_before_cell = self.cursor_y;
-                        self.cursor_y = row_start_y + padding_top;
+                        // Layout `y` is document-absolute (PAGE roots stack in `compute_layout`).
+                        // Row painting uses page-local `content_top` for Text/Inline; Children must
+                        // use the same origin: top of cell content + relative offset inside cell.
+                        let children_min_y = children
+                            .iter()
+                            .map(|&ci| self.layout.nodes[ci].y)
+                            .fold(f32::INFINITY, f32::min);
                         for &child_idx in children {
+                            let child = &self.layout.nodes[child_idx];
+                            let child_styles = self.styled.get(child.arena_id).styles.clone();
+                            let m_top = child_styles.margin.top * MM_TO_PT;
+                            let rel_y = child.y - children_min_y;
+                            self.cursor_y = content_top + rel_y - m_top;
+                            // #region agent log
+                            {
+                                use std::io::Write;
+                                let ts = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis())
+                                    .unwrap_or(0);
+                                if let Ok(mut f) = std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open("/Users/artemmac/programming/personal/lura/.cursor/debug-8cc234.log")
+                                {
+                                    let _ = writeln!(
+                                        f,
+                                        r#"{{"sessionId":"8cc234","hypothesisId":"H1","location":"paginate.rs:place_table:Children","message":"table_cell_child_cursor","data":{{"content_top":{},"child_y":{},"children_min_y":{},"rel_y":{},"cursor_before_margin":{}}},"timestamp":{}}}"#,
+                                        content_top,
+                                        child.y,
+                                        children_min_y,
+                                        rel_y,
+                                        content_top + rel_y - m_top,
+                                        ts
+                                    );
+                                }
+                            }
+                            // #endregion
                             self.place_node(child_idx);
                         }
                         self.cursor_y = cursor_before_cell;
@@ -830,43 +1020,59 @@ impl<'a> Paginator<'a> {
     fn estimate_height(&self, node_idx: LayoutNodeIdx) -> f32 {
         let node = &self.layout.nodes[node_idx];
         let styles = self.styled.get(node.arena_id).styles.clone();
-        if matches!(node.kind, BoxKind::Figure) && matches!(node.content, LayoutContent::Empty) {
-            return Self::figure_placeholder_height_pt(&styles);
-        }
-        let bold = styles.font_weight == FontWeight::Bold;
-        match &node.content {
-            LayoutContent::Text(t) => {
-                let w = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
-                let lines = break_text(
-                    t,
-                    w,
-                    styles.font_size,
-                    styles.line_height,
-                    bold,
-                    styles.letter_spacing,
-                    styles.word_spacing,
-                );
-                text_block_height(&lines)
+        let margin_top = styles.margin.top * MM_TO_PT;
+        let margin_bottom = styles.margin.bottom * MM_TO_PT;
+
+        let inner = if matches!(node.kind, BoxKind::Figure) && matches!(node.content, LayoutContent::Empty)
+        {
+            Self::figure_placeholder_height_pt(&styles)
+        } else {
+            let bold = styles.font_weight == FontWeight::Bold;
+            match &node.content {
+                LayoutContent::Text(t) => {
+                    let w = text_container_width_pt(
+                        node.width,
+                        styles.padding.left,
+                        styles.padding.right,
+                    );
+                    let lines = break_text(
+                        t,
+                        w,
+                        styles.font_size,
+                        styles.line_height,
+                        bold,
+                        styles.letter_spacing,
+                        styles.word_spacing,
+                    );
+                    text_block_height(&lines)
+                }
+                LayoutContent::Inline(runs) => {
+                    let w = text_container_width_pt(
+                        node.width,
+                        styles.padding.left,
+                        styles.padding.right,
+                    );
+                    let justify =
+                        styles.justify || styles.text_align == super::styles::TextAlign::Justify;
+                    inline_runs_block_height(
+                        runs,
+                        w,
+                        styles.font_size,
+                        styles.line_height,
+                        styles.letter_spacing,
+                        styles.word_spacing,
+                        bold,
+                        justify,
+                    )
+                }
+                LayoutContent::Children(children) => {
+                    children.iter().map(|&ci| self.estimate_height(ci)).sum()
+                }
+                LayoutContent::Empty => 0.0,
             }
-            LayoutContent::Inline(runs) => {
-                let w = text_container_width_pt(node.width, styles.padding.left, styles.padding.right);
-                let justify =
-                    styles.justify || styles.text_align == super::styles::TextAlign::Justify;
-                inline_runs_block_height(
-                    runs,
-                    w,
-                    styles.font_size,
-                    styles.line_height,
-                    styles.letter_spacing,
-                    styles.word_spacing,
-                    justify,
-                )
-            }
-            LayoutContent::Children(children) => {
-                children.iter().map(|&ci| self.estimate_height(ci)).sum()
-            }
-            LayoutContent::Empty => 0.0,
-        }
+        };
+
+        margin_top + inner + margin_bottom
     }
 }
 

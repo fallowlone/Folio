@@ -174,6 +174,8 @@ mod tests {
                     bold: false,
                     italic: false,
                     color: Color::BLACK,
+                    link_uri: None,
+                    link_width_pt: None,
                 }],
             }],
         };

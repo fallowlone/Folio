@@ -33,6 +33,7 @@ cp quicklook/ExtensionInfo.plist "$EXT_DIR/Contents/Info.plist"
 
 echo "==> Compiling Host App (SwiftUI)..."
 HOST_SWIFT=(
+    quicklook/Shared/LuraAgentSessionLog.swift
     quicklook/Shared/LuraPdfFFI.swift
     quicklook/Shared/LuraPreviewDiskCache.swift
     quicklook/Shared/LuraPreviewSidecar.swift
@@ -58,7 +59,7 @@ swiftc "${HOST_SWIFT[@]}" \
     -framework PDFKit
 
 echo "==> Compiling Quick Look Extension (Swift)..."
-swiftc quicklook/Shared/LuraPdfFFI.swift quicklook/Shared/LuraPreviewDiskCache.swift quicklook/Shared/LuraPreviewSidecar.swift quicklook/Extension/PreviewViewController.swift \
+swiftc quicklook/Shared/LuraAgentSessionLog.swift quicklook/Shared/LuraPdfFFI.swift quicklook/Shared/LuraPreviewDiskCache.swift quicklook/Shared/LuraPreviewSidecar.swift quicklook/Extension/PreviewViewController.swift \
     -parse-as-library \
     -module-name "$EXT_NAME" \
     -o "$EXT_DIR/Contents/MacOS/$EXT_NAME" \
