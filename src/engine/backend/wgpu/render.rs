@@ -367,6 +367,8 @@ fn build_segments(
                 bold,
                 italic,
                 color,
+                link_uri: _,
+                link_width_pt: _,
             } => {
                 let sci = clip_stack.last().copied().unwrap_or(full_sci);
                 flush_solid(&mut batches, &mut solid, sci);

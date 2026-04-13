@@ -50,6 +50,27 @@ fn test_block_text_content() {
 }
 
 #[test]
+fn showcase_first_h1_preserves_spaces_in_plaintext() {
+    let src = include_str!("../../examples/showcase-large.lura");
+    let doc = parse(src);
+    let page = doc.block(doc.root_ids()[0]);
+    let Content::Children(ids) = &page.content else {
+        panic!("expected PAGE children");
+    };
+    let h1 = doc.block(ids[0]);
+    assert_eq!(h1.kind, "H1");
+    let Content::Inline(nodes) = &h1.content else {
+        panic!("expected H1 inline");
+    };
+    let t = Document::inline_text(nodes);
+    assert!(
+        t.contains("Capability Showcase"),
+        "spaces missing in H1 plaintext: {:?}",
+        t
+    );
+}
+
+#[test]
 fn test_inline_markup_nodes() {
     let doc = parse("P(Hello *world* and **bold** with `code` and [link](https://example.com))");
     let p = doc.block(doc.root_ids()[0]);

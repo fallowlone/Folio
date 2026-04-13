@@ -92,7 +92,18 @@ impl PainterBackend for SvgBackend {
                         ));
                         body.push('\n');
                     }
-                    PainterCommand::Text { content, x, y, font_size, font_family, bold, italic, color } => {
+                    PainterCommand::Text {
+                        content,
+                        x,
+                        y,
+                        font_size,
+                        font_family,
+                        bold,
+                        italic,
+                        color,
+                        link_uri,
+                        link_width_pt: _,
+                    } => {
                         let mut attrs = Vec::new();
                         attrs.push(format!(r#"font-family="{}""#, escape_xml(font_family)));
                         attrs.push(format!(r#"font-size="{:.2}""#, font_size));
@@ -104,13 +115,26 @@ impl PainterBackend for SvgBackend {
                         }
                         attrs.push(format!(r#"fill="{}""#, color_to_svg(*color)));
                         attrs.push(r#"xml:space="preserve""#.to_string());
-                        body.push_str(&format!(
+                        let text_el = format!(
                             r#"<text x="{:.2}" y="{:.2}" {}>{}</text>"#,
                             x,
                             y,
                             attrs.join(" "),
                             escape_xml(content)
-                        ));
+                        );
+                        if let Some(href) = link_uri {
+                            if !href.is_empty() {
+                                body.push_str(&format!(
+                                    r#"<a href="{}">{}</a>"#,
+                                    escape_xml_attr_href(href),
+                                    text_el
+                                ));
+                            } else {
+                                body.push_str(&text_el);
+                            }
+                        } else {
+                            body.push_str(&text_el);
+                        }
                         body.push('\n');
                     }
                 }
@@ -148,4 +172,10 @@ fn escape_xml(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+fn escape_xml_attr_href(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
 }
