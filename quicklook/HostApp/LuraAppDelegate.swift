@@ -16,5 +16,8 @@ final class LuraAppDelegate: NSObject, NSApplicationDelegate {
         LuraDebugLog.log(
             "live log: log stream --style compact --info --predicate 'subsystem == \"\(LuraDebugLog.subsystem)\"'"
         )
+        #if DEBUG
+        SecurityScopedURL.runSelfTest()
+        #endif
     }
 }
