@@ -25,18 +25,22 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         pdfView.translatesAutoresizingMaskIntoConstraints = false
         thumbnailView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Use autoScales for optimized rendering pipeline
+        // Match native PDF Quick Look: continuous vertical scroll, fit-to-width,
+        // tight gap + soft shadow border between pages.
         pdfView.autoScales = true
-        pdfView.displayMode = .singlePage
+        pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
-        pdfView.pageShadowsEnabled = true
+        pdfView.pageShadowsEnabled = false
+        if #available(macOS 11.0, *) {
+            pdfView.pageBreakMargins = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        }
         pdfView.backgroundColor = NSColor.windowBackgroundColor
 
         thumbnailView.pdfView = pdfView
         thumbnailView.maximumNumberOfColumns = 1
         thumbnailView.allowsMultipleSelection = false
-        thumbnailView.thumbnailSize = NSSize(width: 72, height: 96)
-        thumbnailView.backgroundColor = NSColor.controlBackgroundColor
+        thumbnailView.thumbnailSize = NSSize(width: 56, height: 76)
+        thumbnailView.backgroundColor = .clear
 
         container.addSubview(pdfView)
         container.addSubview(thumbnailView)
@@ -51,7 +55,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             thumbnailView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             thumbnailView.topAnchor.constraint(equalTo: container.topAnchor),
             thumbnailView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            thumbnailView.widthAnchor.constraint(equalToConstant: 104),
+            thumbnailView.widthAnchor.constraint(equalToConstant: 80),
 
             errorLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
             errorLabel.trailingAnchor.constraint(equalTo: thumbnailView.leadingAnchor, constant: -16),
@@ -86,9 +90,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             guard let self = self, let doc = PDFDocument(data: data) else { return }
 
             self.pdfView.document = doc
-            // .singlePage mode makes goToFirstPage reliable — no scroll race with
-            // continuous-strip layout landing the view on the last page.
-            self.pdfView.goToFirstPage(nil)
+            self.scrollToTop(self.pdfView)
 
             // #region agent log
             let idx = self.pdfView.currentPage.map { doc.index(for: $0) } ?? -1
@@ -101,6 +103,16 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             )
             // #endregion
         }
+    }
+
+    private func scrollToTop(_ pdfView: PDFView) {
+        guard let scrollView = pdfView.enclosingScrollView else { return }
+        let clipView = scrollView.contentView
+        pdfView.layoutDocumentView()
+        guard let docView = clipView.documentView else { return }
+        let maxScrollY = NSMaxY(docView.frame) - NSHeight(clipView.bounds)
+        clipView.scroll(to: NSPoint(x: 0, y: maxScrollY))
+        scrollView.reflectScrolledClipView(clipView)
     }
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
