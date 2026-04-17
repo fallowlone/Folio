@@ -577,6 +577,7 @@ pub fn inline_runs_intrinsic_max_line_width_pt(
     letter_spacing_pt: f32,
     word_spacing_pt: f32,
     base_bold: bool,
+    base_mono: bool,
 ) -> f32 {
     const HUGE: f32 = 1_000_000.0;
     let lines = break_inline_runs(
@@ -589,24 +590,27 @@ pub fn inline_runs_intrinsic_max_line_width_pt(
             word_spacing_pt,
             base_bold,
             justify: false,
-            base_mono: false,
+            base_mono,
         },
     );
     lines.iter().map(|l| l.width).fold(0.0f32, f32::max).max(1.0)
 }
 
 /// Max word width across runs (min-content width heuristic for inline).
+/// `base_mono` forces mono measurement for every run (used when the containing
+/// block renders in Courier). `r.code` already forces mono per-fragment.
 pub fn max_word_width_across_runs(
     runs: &[InlineRun],
     font_size_pt: f32,
     letter_spacing_pt: f32,
     word_spacing_pt: f32,
     base_bold: bool,
+    base_mono: bool,
 ) -> f32 {
     runs.iter()
         .map(|r| {
             let b = base_bold || r.bold;
-            if r.code {
+            if r.code || base_mono {
                 max_word_width_mono(
                     &r.text,
                     font_size_pt,

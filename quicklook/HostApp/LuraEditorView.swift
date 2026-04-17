@@ -86,12 +86,12 @@ struct LuraEditorView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button {
-                        attemptClose()
+                        attemptEscape()
                     } label: {
                         Label("Close", systemImage: "chevron.backward")
                     }
                     .keyboardShortcut(.escape, modifiers: [])
-                    .help("Return to welcome screen")
+                    .help("Return to welcome screen (closes find bar first)")
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -236,7 +236,7 @@ struct LuraEditorView: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.borderless)
-                .keyboardShortcut(.escape, modifiers: [])
+                .help("Close find bar (Esc)")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -342,6 +342,18 @@ struct LuraEditorView: View {
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Discard")
         return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    /// Esc handler shared by the toolbar Close button and the find bar. If the
+    /// find bar is visible, Esc dismisses it first without navigating away;
+    /// otherwise behaves like the old "back to welcome" action.
+    private func attemptEscape() {
+        if isFindBarVisible {
+            isFindBarVisible = false
+            findQuery = ""
+            return
+        }
+        attemptClose()
     }
 
     private func attemptClose() {

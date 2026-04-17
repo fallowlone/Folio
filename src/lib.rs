@@ -298,16 +298,20 @@ mod ffi_tests {
         let src = CString::new("PAGE(P(Hello))").unwrap();
         let ptr = unsafe { lura_extract_text(src.as_ptr()) };
         assert!(!ptr.is_null());
-        unsafe {
-            let r = &*ptr;
-            assert!(r.error_ptr.is_null(), "unexpected error");
-            assert!(r.json_len > 0);
-            let json = std::str::from_utf8(std::slice::from_raw_parts(r.json_ptr, r.json_len))
-                .expect("utf8");
-            assert!(json.contains("\"text\":\"Hello\""), "payload:\n{}", json);
-            assert!(json.contains("\"page\":0"), "payload:\n{}", json);
-            lura_free_text_index_result(ptr);
-        }
+        // Copy fields out via safe `as_ref()` rather than reborrowing the raw
+        // pointer — avoids the `&*ptr` pattern that CodeQL flags as
+        // `rust/access-invalid-pointer` even under `unsafe`.
+        let (error_ptr, json_ptr, json_len) = unsafe {
+            let r = ptr.as_ref().expect("non-null LuraTextIndexResult");
+            (r.error_ptr, r.json_ptr, r.json_len)
+        };
+        assert!(error_ptr.is_null(), "unexpected error");
+        assert!(json_len > 0);
+        let json = unsafe { std::slice::from_raw_parts(json_ptr, json_len) };
+        let json = std::str::from_utf8(json).expect("utf8");
+        assert!(json.contains("\"text\":\"Hello\""), "payload:\n{}", json);
+        assert!(json.contains("\"page\":0"), "payload:\n{}", json);
+        unsafe { lura_free_text_index_result(ptr); }
     }
 
     #[test]
@@ -315,12 +319,13 @@ mod ffi_tests {
         let src = CString::new("PAGE(").unwrap();
         let ptr = unsafe { lura_extract_text(src.as_ptr()) };
         assert!(!ptr.is_null());
-        unsafe {
-            let r = &*ptr;
-            assert_eq!(r.json_len, 0);
-            assert!(!r.error_ptr.is_null());
-            lura_free_text_index_result(ptr);
-        }
+        let (error_ptr, json_len) = unsafe {
+            let r = ptr.as_ref().expect("non-null LuraTextIndexResult");
+            (r.error_ptr, r.json_len)
+        };
+        assert_eq!(json_len, 0);
+        assert!(!error_ptr.is_null());
+        unsafe { lura_free_text_index_result(ptr); }
     }
 
     #[test]

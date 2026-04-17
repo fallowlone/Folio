@@ -501,6 +501,7 @@ fn measure_inline_leaf(
                     styles.letter_spacing,
                     styles.word_spacing,
                     base_bold,
+                    base_mono,
                 )
             }
             AvailableSpace::MinContent => max_word_width_across_runs(
@@ -509,6 +510,7 @@ fn measure_inline_leaf(
                 styles.letter_spacing,
                 styles.word_spacing,
                 base_bold,
+                base_mono,
             ),
         };
         return Size { width: w, height: h };
@@ -540,6 +542,7 @@ fn measure_inline_leaf(
                 styles.letter_spacing,
                 styles.word_spacing,
                 base_bold,
+                base_mono,
             );
             let h = inline_runs_block_height(
                 runs,
