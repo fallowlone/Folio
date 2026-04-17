@@ -38,6 +38,7 @@ HOST_SWIFT=(
     quicklook/Shared/LuraPreviewDiskCache.swift
     quicklook/HostApp/LuraDebugLog.swift
     quicklook/HostApp/LuraTemplates.swift
+    quicklook/HostApp/RecentEntry.swift
     quicklook/HostApp/RecentFilesStore.swift
     quicklook/HostApp/LuraRenderFFI.swift
     quicklook/HostApp/LuraFileDocument.swift
