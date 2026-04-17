@@ -17,6 +17,9 @@ pub enum Token {
 
     // Values
     Text(String),    // raw text content
+    /// Verbatim body of a raw-body block (CODE). Preserves newlines and whitespace;
+    /// no inline parsing, no block recognition, no `#` breaking. Balanced-paren only.
+    RawText(String),
     String(String),  // "quoted string"
     Number(f64),     // 24, 1.5
     Unit(f64, String), // 25mm, 1fr
