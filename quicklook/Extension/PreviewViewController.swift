@@ -168,20 +168,9 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             siblingToDocument: url
         )
         // #endregion
-        if let sidecar = LuraPreviewSidecar.pdfIfFresh(documentURL: url) {
-            // #region agent log
-            LuraAgentSessionLog.append(
-                hypothesisId: "H1",
-                location: "PreviewViewController.preparePreviewOfFile",
-                message: "branch_sidecar",
-                data: ["bytes": sidecar.count],
-                siblingToDocument: url
-            )
-            // #endregion
-            showPDF(data: sidecar)
-            handler(nil)
-            return
-        }
+        // Reading a sibling `.preview.pdf` from the Quick Look extension triggers the
+        // macOS 15 "data from other apps" TCC prompt. The App Group disk cache below
+        // already covers the warm path, so the sidecar fast-path is dropped.
 
         let fileData: Data
         do {
