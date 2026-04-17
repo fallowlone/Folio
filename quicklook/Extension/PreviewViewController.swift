@@ -25,6 +25,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         pdfView.translatesAutoresizingMaskIntoConstraints = false
         thumbnailView.translatesAutoresizingMaskIntoConstraints = false
 
+        // Use autoScales for optimized rendering pipeline
         pdfView.autoScales = true
         pdfView.displayMode = .singlePage
         pdfView.displayDirection = .vertical
@@ -66,6 +67,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         thumbnailView.isHidden = true
     }
 
+    /// Store PDF data and set first page immediately.
     private func showPDF(data: Data) {
         errorLabel.isHidden = true
         thumbnailView.isHidden = false
