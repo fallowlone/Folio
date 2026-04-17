@@ -45,7 +45,7 @@ struct WelcomeView: View {
             }
             .padding(.horizontal, 40)
 
-            if !recent.urls.isEmpty {
+            if !recent.entries.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text("Recent")
@@ -62,9 +62,11 @@ struct WelcomeView: View {
 
                     ScrollView {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(recent.urls, id: \.path) { url in
-                                RecentRow(url: url) {
-                                    appModel.openDocumentURL(url)
+                            ForEach(recent.entries, id: \.displayPath) { entry in
+                                RecentRow(entry: entry) {
+                                    appModel.openRecent(entry)
+                                } onRemove: {
+                                    recent.remove(entry)
                                 }
                             }
                         }
@@ -148,10 +150,13 @@ private struct ActionCard: View {
 }
 
 private struct RecentRow: View {
-    let url: URL
+    let entry: RecentEntry
     let open: () -> Void
+    let onRemove: () -> Void
 
     private let rowShape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+
+    private var displayURL: URL { URL(fileURLWithPath: entry.displayPath) }
 
     var body: some View {
         Button(action: open) {
@@ -160,10 +165,10 @@ private struct RecentRow: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(url.lastPathComponent)
+                    Text(displayURL.lastPathComponent)
                         .font(.body.weight(.medium))
                         .lineLimit(1)
-                    Text(url.deletingLastPathComponent().path)
+                    Text(displayURL.deletingLastPathComponent().path)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -182,5 +187,8 @@ private struct RecentRow: View {
             .contentShape(rowShape)
         }
         .buttonStyle(.borderless)
+        .contextMenu {
+            Button("Remove from Recents", role: .destructive, action: onRemove)
+        }
     }
 }
