@@ -11,8 +11,15 @@ final class LuraFileDocument: ObservableObject {
 
     private var savedText: String
 
-    init(url: URL) throws {
+    /// Optional. Set when the URL was resolved from a security-scoped bookmark
+    /// (Recents). When set, `deinit` calls `stop()`. Powerbox-granted URLs
+    /// (Open / Save panel, Finder double-click) do NOT need this — system
+    /// manages their scope.
+    private var scope: SecurityScopedURL?
+
+    init(url: URL, scope: SecurityScopedURL? = nil) throws {
         self.url = url
+        self.scope = scope
         let loaded = try String(contentsOf: url, encoding: .utf8)
         self.savedText = loaded
         self.text = loaded
@@ -28,5 +35,9 @@ final class LuraFileDocument: ObservableObject {
         let loaded = try String(contentsOf: url, encoding: .utf8)
         savedText = loaded
         text = loaded
+    }
+
+    deinit {
+        scope?.stop()
     }
 }

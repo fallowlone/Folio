@@ -6,7 +6,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if let url = appModel.openEditorURL {
-                LuraEditorContainer(url: url, onClose: { appModel.openEditorURL = nil })
+                LuraEditorContainer(url: url, onClose: { appModel.closeEditor() })
                     .id(url)
             } else {
                 WelcomeView()
