@@ -186,9 +186,9 @@ fn pipeline_heading_sec_placeholder_svg() {
     let s = String::from_utf8(bytes).expect("utf8 svg");
     assert!(s.contains("Alpha"), "heading body missing: {}", &s[..s.len().min(500)]);
     assert!(s.contains("Beta"));
-    // Sec numbers are rendered inline with heading text (single text element per line)
-    assert!(s.contains(">1 Alpha") || s.contains(">1 "), "sec=1 missing: {}", &s[..s.len().min(500)]);
-    assert!(s.contains(">2 Beta") || s.contains(">2 "), "sec=2 missing");
+    // Sec numbers are rendered as their own per-fragment text elements alongside the body.
+    assert!(s.contains(">1 Alpha") || s.contains(">1<") || s.contains(">1 "), "sec=1 missing: {}", &s[..s.len().min(500)]);
+    assert!(s.contains(">2 Beta") || s.contains(">2<") || s.contains(">2 "), "sec=2 missing");
 }
 
 /// `{{page:id}}` resolves to the 1-based start page of the target block.

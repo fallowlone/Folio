@@ -642,38 +642,31 @@ impl<'a> Paginator<'a> {
             }
             for (k, line) in lines[*a..*b].iter().enumerate() {
                 let baseline_y = seg_top + styles.font_size + k as f32 * line.line_height_pt;
-                // Render each line as a single Text command to avoid micro-gaps.
-                let first = line.fragments.first();
-                let font_family = if first.is_some_and(|f| f.code) {
-                    "Courier".to_string()
-                } else {
-                    styles.font_family.clone()
-                };
-                let group_bold = first.map_or(bold, |f| bold || f.bold);
-                let group_italic = italic_base || first.is_some_and(|f| f.italic);
-                let (link_uri, link_width_pt) = line
-                    .fragments
-                    .iter()
-                    .find(|f| f.link.is_some())
-                    .map(|f| (f.link.clone(), Some(f.width)))
-                    .unwrap_or((None, None));
-                let group_color = if link_uri.is_some() {
-                    Color::from_hex(0x1D4ED8)
-                } else {
-                    styles.color
-                };
-                self.push_cmd(DrawCommand::Text {
-                    content: line.full_text.clone(),
-                    x: block_x + padding_left,
-                    y: baseline_y,
-                    font_size: styles.font_size,
-                    font_family,
-                    bold: group_bold,
-                    italic: group_italic,
-                    color: group_color,
-                    link_uri,
-                    link_width_pt,
-                });
+                let mut x_cursor = block_x + padding_left;
+                for frag in &line.fragments {
+                    let font_family = if frag.code {
+                        "Courier".to_string()
+                    } else {
+                        styles.font_family.clone()
+                    };
+                    self.push_cmd(DrawCommand::Text {
+                        content: frag.text.clone(),
+                        x: x_cursor,
+                        y: baseline_y,
+                        font_size: styles.font_size,
+                        font_family,
+                        bold: bold || frag.bold,
+                        italic: italic_base || frag.italic,
+                        color: if frag.link.is_some() {
+                            Color::from_hex(0x1D4ED8)
+                        } else {
+                            styles.color
+                        },
+                        link_uri: frag.link.clone(),
+                        link_width_pt: frag.link.as_ref().map(|_| frag.width),
+                    });
+                    x_cursor += frag.width;
+                }
             }
             self.cursor_y = seg_top + seg_h;
             total += seg_h;
