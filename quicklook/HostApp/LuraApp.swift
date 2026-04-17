@@ -6,7 +6,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if let url = appModel.openEditorURL {
-                LuraEditorContainer(url: url, onClose: { appModel.openEditorURL = nil })
+                LuraEditorContainer(url: url, onClose: { appModel.closeEditor() })
                     .id(url)
             } else {
                 WelcomeView()
@@ -24,6 +24,13 @@ struct LuraApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appModel)
+                .onOpenURL { url in
+                    LuraDebugLog.log("WindowGroup.onOpenURL url=\(url.lastPathComponent)")
+                    appModel.openDocumentURL(url)
+                }
+                .task {
+                    appDelegate.register(model: appModel)
+                }
         }
         .defaultSize(width: 960, height: 640)
         .commands {

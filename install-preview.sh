@@ -38,6 +38,8 @@ HOST_SWIFT=(
     quicklook/Shared/LuraPreviewDiskCache.swift
     quicklook/HostApp/LuraDebugLog.swift
     quicklook/HostApp/LuraTemplates.swift
+    quicklook/HostApp/RecentEntry.swift
+    quicklook/HostApp/SecurityScopedURL.swift
     quicklook/HostApp/RecentFilesStore.swift
     quicklook/HostApp/LuraRenderFFI.swift
     quicklook/HostApp/LuraFileDocument.swift
@@ -52,6 +54,7 @@ HOST_SWIFT=(
 swiftc "${HOST_SWIFT[@]}" \
     -o "$APP_DIR/Contents/MacOS/$APP_NAME" \
     -target arm64-apple-macos13.0 \
+    -D DEBUG \
     -framework SwiftUI \
     -framework AppKit \
     -framework UniformTypeIdentifiers \
@@ -64,6 +67,7 @@ swiftc quicklook/Shared/LuraAgentSessionLog.swift quicklook/Shared/LuraPdfFFI.sw
     -o "$EXT_DIR/Contents/MacOS/$EXT_NAME" \
     -framework Cocoa -framework Quartz -framework PDFKit \
     -target arm64-apple-macos12.0 \
+    -D DEBUG \
     -Xlinker -e -Xlinker _NSExtensionMain
 
 echo "==> Creating Entitlements..."

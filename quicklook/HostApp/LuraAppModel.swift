@@ -8,6 +8,25 @@ final class LuraAppModel: ObservableObject {
     /// Synced from the editor so menu actions can warn before replacing an unsaved document.
     @Published var editorIsDirty: Bool = false
 
+    /// Held while a Recents-resolved document is open so its security-scoped
+    /// access lives at least as long as the editor view. `nil` for Powerbox-
+    /// granted URLs (Open / Save panel, Finder double-click) — system manages
+    /// their scope.
+    private var activeScope: SecurityScopedURL?
+
+    /// Single point where `openEditorURL` is mutated. Always releases the old
+    /// scope first; `newScope` is retained for the lifetime of the new editor.
+    private func setOpenEditor(url: URL?, scope: SecurityScopedURL?) {
+        activeScope?.stop()
+        activeScope = scope
+        openEditorURL = url
+        editorIsDirty = false
+    }
+
+    func closeEditor() {
+        setOpenEditor(url: nil, scope: nil)
+    }
+
     /// Single exported UTI from HostInfo.plist (`fol` + `lura` extensions on one type).
     private static var documentTypes: [UTType] {
         [UTType(exportedAs: "com.fallowlone.lura-document")]
@@ -76,8 +95,7 @@ final class LuraAppModel: ObservableObject {
             try LuraTemplates.newDocument.write(to: url, atomically: true, encoding: .utf8)
             LuraDebugLog.log("write template OK, opening editor")
             RecentFilesStore.shared.recordOpened(url)
-            openEditorURL = url
-            editorIsDirty = false
+            setOpenEditor(url: url, scope: nil)
         } catch {
             LuraDebugLog.log("write template FAILED: \(error.localizedDescription)")
             presentAlert(title: "Could not create file", message: error.localizedDescription)
@@ -137,15 +155,36 @@ final class LuraAppModel: ObservableObject {
     private func finishOpen(panel: NSOpenPanel, response: NSApplication.ModalResponse) {
         guard response == .OK, let url = panel.url else { return }
         RecentFilesStore.shared.recordOpened(url)
-        openEditorURL = url
-        editorIsDirty = false
+        setOpenEditor(url: url, scope: nil)
     }
 
     func openDocumentURL(_ url: URL) {
         if !mayReplaceOpenDocument() { return }
         RecentFilesStore.shared.recordOpened(url)
-        openEditorURL = url
-        editorIsDirty = false
+        setOpenEditor(url: url, scope: nil)
+    }
+
+    func openRecent(_ entry: RecentEntry) {
+        if !mayReplaceOpenDocument() { return }
+        switch RecentFilesStore.shared.resolve(entry) {
+        case .success(let url):
+            let scope = SecurityScopedURL(url: url)
+            guard scope.start() else {
+                presentAlert(
+                    title: "Could not open file",
+                    message: "Sandbox refused access to \(url.lastPathComponent). It may have moved."
+                )
+                return
+            }
+            RecentFilesStore.shared.recordOpened(url)
+            setOpenEditor(url: url, scope: scope)
+        case .failure(let err):
+            presentAlert(
+                title: "Could not open recent file",
+                message: "\(err)"
+            )
+            RecentFilesStore.shared.remove(entry)
+        }
     }
 
     private func mayReplaceOpenDocument() -> Bool {
