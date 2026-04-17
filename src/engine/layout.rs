@@ -471,6 +471,7 @@ fn measure_inline_leaf(
 ) -> Size<f32> {
     let justify = styles.justify || styles.text_align == TextAlign::Justify;
     let base_bold = styles.font_weight == FontWeight::Bold;
+    let base_mono = styles.font_family.eq_ignore_ascii_case("Courier");
 
     if let Some(w) = known_dimensions.width {
         let h = inline_runs_block_height(
@@ -483,6 +484,7 @@ fn measure_inline_leaf(
                 word_spacing_pt: styles.word_spacing,
                 base_bold,
                 justify,
+                base_mono,
             },
         );
         return Size { width: w, height: h };
@@ -524,6 +526,7 @@ fn measure_inline_leaf(
                     word_spacing_pt: styles.word_spacing,
                     base_bold,
                     justify: false,
+                    base_mono,
                 },
             );
             let w = lines.iter().map(|l| l.width).fold(0.0f32, f32::max).max(1.0);
@@ -548,6 +551,7 @@ fn measure_inline_leaf(
                     word_spacing_pt: styles.word_spacing,
                     base_bold,
                     justify,
+                    base_mono,
                 },
             );
             Size { width: mw, height: h }
@@ -564,6 +568,7 @@ fn measure_inline_leaf(
                     word_spacing_pt: styles.word_spacing,
                     base_bold,
                     justify,
+                    base_mono,
                 },
             );
             Size { width: w, height: h }

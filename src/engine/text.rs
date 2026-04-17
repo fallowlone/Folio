@@ -540,6 +540,7 @@ pub fn inline_lines_block_height(lines: &[InlineLine], font_size_pt: f32, line_h
 }
 
 /// Layout options for text wrapping and measurement.
+#[derive(Default)]
 pub struct TextLayoutOpts {
     pub font_size_pt: f32,
     pub line_height: f32,
@@ -547,6 +548,11 @@ pub struct TextLayoutOpts {
     pub word_spacing_pt: f32,
     pub base_bold: bool,
     pub justify: bool,
+    /// True when the containing block renders in a monospace face (Courier).
+    /// Makes `break_inline_runs` measure every fragment with mono metrics, not
+    /// just `run.code` ones. Without this, rendering a mono block using
+    /// Helvetica-measured widths collapses glyphs into each other.
+    pub base_mono: bool,
 }
 
 /// Block height for inline runs after wrapping to `max_width_pt` (matches paginator math).
@@ -583,6 +589,7 @@ pub fn inline_runs_intrinsic_max_line_width_pt(
             word_spacing_pt,
             base_bold,
             justify: false,
+            base_mono: false,
         },
     );
     lines.iter().map(|l| l.width).fold(0.0f32, f32::max).max(1.0)
@@ -679,7 +686,7 @@ pub fn break_inline_runs(
         }
         for part in parts {
             let measure_bold = opts.base_bold || run.bold;
-            let width = if run.code {
+            let width = if run.code || opts.base_mono {
                 let m = text_width_pt_with_spacing_mono(
                     &part,
                     opts.font_size_pt,
@@ -841,6 +848,7 @@ mod space_width_tests {
             word_spacing_pt: 0.0,
             base_bold: true,
             justify: false,
+            base_mono: false,
         });
         let frags = &lines[0].fragments;
         for f in frags {
@@ -878,6 +886,7 @@ mod space_width_tests {
             word_spacing_pt: 0.0,
             base_bold: true,
             justify: false,
+            base_mono: false,
         });
         let w0 = lines[0].fragments[0].width;
         assert!(
